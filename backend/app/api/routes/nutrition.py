@@ -1,0 +1,233 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from typing import List
+from datetime import datetime, timedelta
+
+from app.core.database import get_db
+from app.api.dependencies import get_current_user
+from app.models.user import User
+from app.models.nutrition import NutritionPlan, Meal
+from app.schemas.nutrition import (
+    SimplifiedNutritionPlanResponse as NutritionPlanResponse,
+    NutritionPlanCreate,
+    MealLogCreate,
+)
+
+router = APIRouter()
+
+
+@router.get("/current-plan", response_model=NutritionPlanResponse)
+async def get_current_nutrition_plan(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get user's current nutrition plan"""
+    # Get most recent plan
+    result = await db.execute(
+        select(NutritionPlan)
+        .where(NutritionPlan.user_id == current_user.id)
+        .order_by(desc(NutritionPlan.week_start))
+        .limit(1)
+    )
+    plan = result.scalar_one_or_none()
+    
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No nutrition plan found. Please generate one first."
+        )
+    
+    # Get meals for this plan
+    meals_result = await db.execute(
+        select(Meal).where(Meal.plan_id == plan.id)
+    )
+    meals = meals_result.scalars().all()
+    
+    return {
+        "id": str(plan.id),
+        "user_id": str(plan.user_id),
+        "week_start": plan.week_start.isoformat(),
+        "daily_calories": plan.daily_calories,
+        "macros": {
+            "protein": plan.protein_grams,
+            "carbs": plan.carbs_grams,
+            "fat": plan.fat_grams,
+        },
+        "meals": _organize_meals_by_day(meals),
+        "created_by_ai": plan.created_by_ai,
+        "adaptation_reason": plan.adaptation_reason,
+    }
+
+
+@router.post("/generate", response_model=NutritionPlanResponse)
+async def generate_nutrition_plan(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Generate a new AI-powered nutrition plan"""
+    # TODO: Integrate with LangChain agent for AI generation
+    # For now, create a basic plan
+    
+    # Calculate week start (current Monday)
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    
+    # Create nutrition plan
+    plan = NutritionPlan(
+        user_id=current_user.id,
+        week_start=week_start,
+        week_end=week_start + timedelta(days=6),
+        daily_calories=2200,
+        protein_grams=165,
+        carbs_grams=220,
+        fat_grams=73,
+        created_by_ai=True,
+        adaptation_reason="Initial plan based on your profile and goals"
+    )
+    
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    
+    # Create sample meals
+    meals = _create_sample_meals(plan.id)
+    for meal in meals:
+        db.add(meal)
+    
+    await db.commit()
+    
+    # Fetch created meals
+    meals_result = await db.execute(
+        select(Meal).where(Meal.nutrition_plan_id == plan.id)
+    )
+    created_meals = meals_result.scalars().all()
+    
+    return {
+        "id": str(plan.id),
+        "user_id": str(plan.user_id),
+        "week_start": plan.week_start.isoformat(),
+        "daily_calories": plan.daily_calories,
+        "macros": {
+            "protein": plan.protein_grams,
+            "carbs": plan.carbs_grams,
+            "fat": plan.fat_grams,
+        },
+        "meals": _organize_meals_by_day(created_meals),
+        "created_by_ai": plan.created_by_ai,
+        "adaptation_reason": plan.adaptation_reason,
+    }
+
+
+@router.post("/log-meal")
+async def log_meal(
+    meal_data: MealLogCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Log a consumed meal"""
+    # TODO: Implement meal logging
+    return {"message": "Meal logged successfully"}
+
+
+def _organize_meals_by_day(meals: List[Meal]) -> List[dict]:
+    """Organize meals by day of week"""
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    organized = []
+    
+    for day in days:
+        day_meals = [m for m in meals if m.day_of_week.lower() == day]
+        
+        organized.append({
+            "day": day,
+            "breakfast": [_meal_to_dict(m) for m in day_meals if m.meal_type == "breakfast"],
+            "lunch": [_meal_to_dict(m) for m in day_meals if m.meal_type == "lunch"],
+            "dinner": [_meal_to_dict(m) for m in day_meals if m.meal_type == "dinner"],
+            "snacks": [_meal_to_dict(m) for m in day_meals if m.meal_type == "snack"],
+        })
+    
+    return organized
+
+
+def _meal_to_dict(meal: Meal) -> dict:
+    """Convert meal model to dict"""
+    return {
+        "id": str(meal.id),
+        "name": meal.name,
+        "calories": meal.calories,
+        "protein": meal.protein,
+        "carbs": meal.carbs,
+        "fat": meal.fat,
+        "ingredients": meal.ingredients or [],
+        "instructions": meal.instructions,
+        "prep_time": meal.prep_time_minutes,
+    }
+
+
+def _create_sample_meals(plan_id) -> List[Meal]:
+    """Create sample meals for testing"""
+    meals = []
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    for day in days:
+        # Breakfast
+        meals.append(Meal(
+            nutrition_plan_id=plan_id,
+            day_of_week=day,
+            meal_type="breakfast",
+            name=f"Protein Oatmeal Bowl",
+            calories=450,
+            protein=25,
+            carbs=55,
+            fat=12,
+            ingredients=["Oats", "Protein powder", "Banana", "Almond butter", "Berries"],
+            instructions="Mix oats with water, add protein powder, top with fruits and nut butter",
+            prep_time_minutes=10,
+        ))
+        
+        # Lunch
+        meals.append(Meal(
+            nutrition_plan_id=plan_id,
+            day_of_week=day,
+            meal_type="lunch",
+            name=f"Grilled Chicken Salad",
+            calories=520,
+            protein=45,
+            carbs=25,
+            fat=28,
+            ingredients=["Chicken breast", "Mixed greens", "Avocado", "Cherry tomatoes", "Olive oil"],
+            instructions="Grill chicken, toss with greens and vegetables, drizzle with olive oil",
+            prep_time_minutes=15,
+        ))
+        
+        # Dinner
+        meals.append(Meal(
+            nutrition_plan_id=plan_id,
+            day_of_week=day,
+            meal_type="dinner",
+            name=f"Salmon with Quinoa",
+            calories=680,
+            protein=42,
+            carbs=45,
+            fat=32,
+            ingredients=["Salmon fillet", "Quinoa", "Broccoli", "Sweet potato", "Lemon"],
+            instructions="Bake salmon, cook quinoa, steam vegetables",
+            prep_time_minutes=25,
+        ))
+        
+        # Snack
+        meals.append(Meal(
+            nutrition_plan_id=plan_id,
+            day_of_week=day,
+            meal_type="snack",
+            name=f"Greek Yogurt & Nuts",
+            calories=280,
+            protein=20,
+            carbs=15,
+            fat=18,
+            ingredients=["Greek yogurt", "Mixed nuts", "Honey"],
+            instructions="Mix yogurt with nuts and a drizzle of honey",
+            prep_time_minutes=2,
+        ))
+    
+    return meals
