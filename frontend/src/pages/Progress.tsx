@@ -41,6 +41,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useProgressHistory, useLogProgress, useAIInsights } from '@/hooks/useApi';
+import type { ProgressEntryCreate } from '@/services/api';
 
 interface StatCardProps {
   title: string;
@@ -72,19 +73,25 @@ export default function Progress() {
 
     const latestEntry = progressHistory[0];
     const oldestEntry = progressHistory[progressHistory.length - 1];
+    const latestWeight = latestEntry.weight ?? 0;
+    const oldestWeight = oldestEntry.weight ?? 0;
+    const latestBodyFat = latestEntry.body_fat_percentage ?? 0;
+    const oldestBodyFat = oldestEntry.body_fat_percentage ?? 0;
     
-    const weightChange = (latestEntry.weight || 0) - (oldestEntry.weight || 0);
-    const bodyFatChange = (latestEntry.body_fat || 0) - (oldestEntry.body_fat || 0);
+    const weightChange = latestWeight - oldestWeight;
+    const bodyFatChange = latestBodyFat - oldestBodyFat;
+    const averageAdherence = progressHistory.reduce((sum, entry) => sum + (entry.adherence_score ?? 0), 0) /
+      progressHistory.length;
     
     return {
       weight: {
-        current: latestEntry.weight || 0,
+        current: latestWeight,
         change: weightChange,
         goal: 0, // TODO: Get from user profile goals
         trend: (weightChange < 0 ? 'down' : 'up') as 'up' | 'down',
       },
       bodyFat: {
-        current: latestEntry.body_fat || 0,
+        current: latestBodyFat,
         change: bodyFatChange,
         trend: (bodyFatChange < 0 ? 'down' : 'up') as 'up' | 'down',
       },
@@ -94,7 +101,7 @@ export default function Progress() {
         trend: 'up' as const,
       },
       strength: {
-        current: Math.round((progressHistory.reduce((sum, p) => sum + p.adherence_score, 0) / progressHistory.length) || 0),
+        current: Math.round(averageAdherence || 0),
         change: 0, // TODO: Calculate from workout logs
         trend: 'up' as const,
       },
@@ -114,10 +121,10 @@ export default function Progress() {
       
       metrics.push({
         week: `Week ${weeks - i}`,
-        adherence: Math.round(weekData.reduce((sum, p) => sum + p.adherence_score, 0) / weekData.length),
-        weight: Number((weekData.reduce((sum, p) => sum + (p.weight || 0), 0) / weekData.length).toFixed(1)),
-        energy: Number((weekData.reduce((sum, p) => sum + p.energy, 0) / weekData.length).toFixed(1)),
-        mood: Number((weekData.reduce((sum, p) => sum + p.mood, 0) / weekData.length).toFixed(1)),
+        adherence: Math.round(weekData.reduce((sum, p) => sum + (p.adherence_score ?? 0), 0) / weekData.length),
+        weight: Number((weekData.reduce((sum, p) => sum + (p.weight ?? 0), 0) / weekData.length).toFixed(1)),
+        energy: Number((weekData.reduce((sum, p) => sum + (p.energy_score ?? 0), 0) / weekData.length).toFixed(1)),
+        mood: Number((weekData.reduce((sum, p) => sum + (p.mood_score ?? 0), 0) / weekData.length).toFixed(1)),
       });
     }
     
@@ -132,40 +139,40 @@ export default function Progress() {
     
     // Check for consistency (7 days with adherence > 80%)
     const recentWeek = progressHistory.slice(0, 7);
-    const consistentDays = recentWeek.filter(p => p.adherence_score >= 80).length;
+    const consistentDays = recentWeek.filter(p => (p.adherence_score ?? 0) >= 80).length;
     achievementList.push({
       id: '1',
       title: 'Consistency Champion',
       description: '7 days straight of hitting your goals',
       icon: Award,
       earned: consistentDays >= 7,
-      date: consistentDays >= 7 ? recentWeek[0]?.date : undefined,
+      date: consistentDays >= 7 ? recentWeek[0]?.entry_date : undefined,
       progress: Math.round((consistentDays / 7) * 100),
     });
     
     // Check for hydration (14 days with water >= 2000ml)
     const recentTwoWeeks = progressHistory.slice(0, 14);
-    const hydrationDays = recentTwoWeeks.filter(p => p.water_intake >= 2000).length;
+    const hydrationDays = recentTwoWeeks.filter(p => (p.water_intake_ml ?? 0) >= 2000).length;
     achievementList.push({
       id: '3',
       title: 'Hydration Hero',
       description: 'Perfect water intake for 14 days',
       icon: Droplets,
       earned: hydrationDays >= 14,
-      date: hydrationDays >= 14 ? recentTwoWeeks[0]?.date : undefined,
+      date: hydrationDays >= 14 ? recentTwoWeeks[0]?.entry_date : undefined,
       progress: Math.round((hydrationDays / 14) * 100),
     });
     
     // Check for sleep (30 days with >= 7 hours)
     const recentMonth = progressHistory.slice(0, 30);
-    const sleepDays = recentMonth.filter(p => p.sleep_hours >= 7).length;
+    const sleepDays = recentMonth.filter(p => (p.sleep_hours ?? 0) >= 7).length;
     achievementList.push({
       id: '4',
       title: 'Sleep Master',
       description: 'Optimal sleep for 30 days',
       icon: Moon,
       earned: sleepDays >= 30,
-      date: sleepDays >= 30 ? recentMonth[0]?.date : undefined,
+      date: sleepDays >= 30 ? recentMonth[0]?.entry_date : undefined,
       progress: Math.round((sleepDays / 30) * 100),
     });
     
@@ -176,21 +183,63 @@ export default function Progress() {
   const recentEntries = React.useMemo(() => {
     if (!progressHistory) return [];
     return progressHistory.slice(0, 10).map(entry => ({
-      date: entry.date,
-      weight: entry.weight || 0,
-      mood: entry.mood,
-      energy: entry.energy,
-      sleep: entry.sleep_hours,
-      water: entry.water_intake,
-      adherence: entry.adherence_score,
+      id: entry.id,
+      date: entry.entry_date,
+      weight: entry.weight ?? 0,
+      bodyFat: entry.body_fat_percentage ?? 0,
+      mood: entry.mood_score ?? 0,
+      energy: entry.energy_score ?? 0,
+      sleep: entry.sleep_hours ?? 0,
+      water: entry.water_intake_ml ?? 0,
+      adherence: entry.adherence_score ?? 0,
     }));
   }, [progressHistory]);
 
-  const handleLogProgress = async (data: any) => {
-    await logProgress.mutateAsync({
-      date: new Date().toISOString(),
-      ...data,
-    });
+  // Dialog state for progress logging
+  const [isProgressDialogOpen, setIsProgressDialogOpen] = React.useState(false);
+  
+  // Form state for progress logging
+  const [progressForm, setProgressForm] = React.useState({
+    weight: '',
+    body_fat: '',
+    mood: '',
+    energy: '',
+    sleep_hours: '',
+    water_intake: '',
+  });
+
+  const handleLogProgress = async () => {
+    try {
+      const formData: ProgressEntryCreate = {
+        entry_date: new Date().toISOString().split('T')[0], // Required field
+        weight: progressForm.weight ? parseFloat(progressForm.weight) : undefined,
+        body_fat_percentage: progressForm.body_fat ? parseFloat(progressForm.body_fat) : undefined,
+        mood_score: progressForm.mood ? parseInt(progressForm.mood) : undefined,
+        energy_score: progressForm.energy ? parseInt(progressForm.energy) : undefined,
+        sleep_hours: progressForm.sleep_hours ? parseFloat(progressForm.sleep_hours) : undefined,
+        water_intake_ml: progressForm.water_intake ? parseInt(progressForm.water_intake) : undefined,
+      };
+
+      // Filter out undefined values but keep required entry_date
+      const cleanedData = Object.fromEntries(
+        Object.entries(formData).filter(([key, value]) => key === 'entry_date' || value !== undefined)
+      ) as unknown as ProgressEntryCreate;
+
+      await logProgress.mutateAsync(cleanedData);
+      
+      // Close dialog and reset form
+      setIsProgressDialogOpen(false);
+      setProgressForm({
+        weight: '',
+        body_fat: '',
+        mood: '',
+        energy: '',
+        sleep_hours: '',
+        water_intake: '',
+      });
+    } catch (error) {
+      console.error('Failed to log progress:', error);
+    }
   };
 
   const StatCard = ({ 
@@ -257,7 +306,7 @@ export default function Progress() {
               <SelectItem value="365">1 year</SelectItem>
             </SelectContent>
           </Select>
-          <Dialog>
+          <Dialog open={isProgressDialogOpen} onOpenChange={setIsProgressDialogOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -275,35 +324,82 @@ export default function Progress() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="weight">Weight (kg)</Label>
-                    <Input id="weight" type="number" step="0.1" placeholder="74.2" />
+                    <Input 
+                      id="weight" 
+                      type="number" 
+                      step="0.1" 
+                      placeholder="74.2"
+                      value={progressForm.weight}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, weight: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="body-fat">Body Fat (%)</Label>
-                    <Input id="body-fat" type="number" step="0.1" placeholder="15.2" />
+                    <Input 
+                      id="body-fat" 
+                      type="number" 
+                      step="0.1" 
+                      placeholder="15.2"
+                      value={progressForm.body_fat}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, body_fat: e.target.value }))}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="mood">Mood (1-10)</Label>
-                    <Input id="mood" type="number" min="1" max="10" placeholder="8" />
+                    <Input 
+                      id="mood" 
+                      type="number" 
+                      min="1" 
+                      max="10" 
+                      placeholder="8"
+                      value={progressForm.mood}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, mood: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="energy">Energy (1-10)</Label>
-                    <Input id="energy" type="number" min="1" max="10" placeholder="8" />
+                    <Input 
+                      id="energy" 
+                      type="number" 
+                      min="1" 
+                      max="10" 
+                      placeholder="8"
+                      value={progressForm.energy}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, energy: e.target.value }))}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="sleep">Sleep (hours)</Label>
-                    <Input id="sleep" type="number" step="0.5" placeholder="7.5" />
+                    <Input 
+                      id="sleep" 
+                      type="number" 
+                      step="0.5" 
+                      placeholder="7.5"
+                      value={progressForm.sleep_hours}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, sleep_hours: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="water">Water (ml)</Label>
-                    <Input id="water" type="number" placeholder="2400" />
+                    <Input 
+                      id="water" 
+                      type="number" 
+                      placeholder="2400"
+                      value={progressForm.water_intake}
+                      onChange={(e) => setProgressForm(prev => ({ ...prev, water_intake: e.target.value }))}
+                    />
                   </div>
                 </div>
-                <Button onClick={handleLogProgress} className="w-full">
-                  Log Progress
+                <Button 
+                  onClick={handleLogProgress} 
+                  className="w-full"
+                  disabled={logProgress.isPending}
+                >
+                  {logProgress.isPending ? 'Logging Progress...' : 'Log Progress'}
                 </Button>
               </div>
             </DialogContent>
@@ -367,7 +463,7 @@ export default function Progress() {
             <CardContent>
               <div className="space-y-4">
                 {weeklyMetrics.map((week, index) => (
-                  <div key={week.week} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <div key={`${week.week}-${index}`} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                     <div className="font-medium">{week.week}</div>
                     <div className="grid grid-cols-4 gap-4 text-sm">
                       <div className="text-center">
@@ -406,7 +502,7 @@ export default function Progress() {
               <div className="space-y-3">
                 {recentEntries.length > 0 ? (
                   recentEntries.map((entry, index) => (
-                    <div key={entry.date} className="flex items-center justify-between p-3 rounded-lg border">
+                    <div key={entry.id ?? `${entry.date}-${index}`} className="flex items-center justify-between p-3 rounded-lg border">
                       <div className="font-medium">{new Date(entry.date).toLocaleDateString()}</div>
                       <div className="flex items-center gap-6 text-sm">
                         {entry.weight > 0 && (

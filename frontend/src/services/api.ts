@@ -96,15 +96,38 @@ export interface Exercise {
 export interface ProgressEntry {
   id: string;
   user_id: string;
-  date: string;
+  entry_date: string;
+  created_at: string;
+  weight?: number | null;
+  body_fat_percentage?: number | null;
+  muscle_mass?: number | null;
+  measurements?: Record<string, number> | null;
+  mood_score?: number | null; // 1-10
+  energy_score?: number | null; // 1-10
+  stress_score?: number | null; // 1-10
+  sleep_hours?: number | null;
+  sleep_quality?: number | null;
+  water_intake_ml?: number | null; // ml
+  adherence_score?: number | null; // 0-100
+  notes?: string | null;
+  photos?: Record<string, unknown> | null;
+}
+
+export interface ProgressEntryCreate {
+  entry_date: string;
   weight?: number;
-  body_fat?: number;
+  body_fat_percentage?: number;
+  muscle_mass?: number;
   measurements?: Record<string, number>;
-  mood: number; // 1-10
-  energy: number; // 1-10
-  sleep_hours: number;
-  water_intake: number; // ml
-  adherence_score: number; // 0-100
+  mood_score?: number; // 1-10
+  energy_score?: number; // 1-10
+  stress_score?: number; // 1-10
+  sleep_hours?: number;
+  sleep_quality?: number; // 1-10
+  water_intake_ml?: number; // ml
+  adherence_score?: number; // 0-100
+  notes?: string;
+  photos?: Record<string, unknown>;
 }
 
 export interface AIInsight {
@@ -127,10 +150,18 @@ class APIClient {
     this.token = localStorage.getItem('auth_token');
   }
 
+  private refreshToken() {
+    this.token = localStorage.getItem('auth_token');
+    console.log('Token refreshed:', this.token ? 'Token found' : 'No token found');
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    // Refresh token from localStorage in case it was updated
+    this.refreshToken();
+    
     const url = `${API_BASE_URL}${endpoint}`;
     const config: RequestInit = {
       headers: {
@@ -141,13 +172,27 @@ class APIClient {
       ...options,
     };
 
+    console.log(`Making request to ${endpoint}`, { 
+      method: options.method || 'GET',
+      hasToken: !!this.token,
+      headers: config.headers 
+    });
+
     try {
       const response = await fetch(url, config);
       
       if (!response.ok) {
+        console.error(`API Error: ${response.status} ${response.statusText} for ${endpoint}`);
+        
         if (response.status === 401) {
+          console.error('Authentication failed - user needs to login');
           this.logout();
-          throw new Error('Authentication required');
+          throw new Error('Please log in to access this feature');
+        }
+        
+        if (response.status === 403) {
+          console.error('Access forbidden - user lacks permission');
+          throw new Error('Access denied. Please check your subscription or permissions.');
         }
         
         // Handle 404 gracefully - treat as "no data" rather than error
@@ -155,7 +200,32 @@ class APIClient {
           throw new Error('NOT_FOUND');
         }
         
-        throw new Error(`API Error: ${response.status}`);
+        // Try to get error message from response
+        let errorMessage = `API Error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          
+          // Handle validation errors (422)
+          if (response.status === 422 && errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+              // Pydantic validation errors
+              const validationErrors = errorData.detail
+                .map((err: any) => `${err.loc?.join('.')}: ${err.msg}`)
+                .join(', ');
+              errorMessage = `Validation Error: ${validationErrors}`;
+            } else {
+              errorMessage = `Validation Error: ${errorData.detail}`;
+            }
+          } else {
+            errorMessage = errorData.detail || errorData.message || errorMessage;
+          }
+          
+          console.error('API Error Details:', errorData);
+        } catch {
+          // Ignore JSON parse errors, use default message
+        }
+        
+        throw new Error(errorMessage);
       }
 
       return await response.json();
@@ -284,7 +354,7 @@ class APIClient {
     return this.request<ProgressEntry[]>(`/progress?days=${days}`);
   }
 
-  async logProgress(progressData: Partial<ProgressEntry>): Promise<ProgressEntry> {
+  async logProgress(progressData: ProgressEntryCreate): Promise<ProgressEntry> {
     return this.request<ProgressEntry>('/progress', {
       method: 'POST',
       body: JSON.stringify(progressData),
@@ -322,74 +392,23 @@ class APIClient {
     //   features: string[];
     // }>('/subscription/status');
     
-    // Temporary mock response
-    return Promise.resolve({
-      tier: 'free',
-      features: ['Basic nutrition plans', 'Basic workout plans', 'Progress tracking']
+    return this.request<{
+      tier: 'free' | 'premium' | 'enterprise';
+      expires_at?: string;
+      features: string[];
+    }>('/subscription/status');
+  }
+
+  async createSubscription(plan: 'premium' | 'enterprise'): Promise<{ url: string }> {
+    return this.request<{ url: string }>('/subscription/create', {
+      method: 'POST',
+      body: JSON.stringify({ plan }),
     });
   }
 
-  async createSubscription(tier: 'premium' | 'enterprise'): Promise<{ checkout_url: string }> {
-    // TODO: Implement subscription endpoints in backend
-    // return this.request<{ checkout_url: string }>('/subscription/create', {
-    //   method: 'POST',
-    //   body: JSON.stringify({ tier }),
-    // });
-    
-    // Temporary mock response
-    return Promise.resolve({ checkout_url: '/subscription/checkout' });
-  }
+
 }
 
 // Create singleton instance
 export const apiClient = new APIClient();
 
-// Mock data for offline development
-export const mockData = {
-  user: {
-    id: '1',
-    email: 'demo@nutrify.ai',
-    name: 'Demo User',
-    subscription_tier: 'premium' as const,
-    created_at: '2024-01-01T00:00:00Z',
-  },
-  
-  profile: {
-    id: '1',
-    user_id: '1',
-    age: 28,
-    gender: 'male' as const,
-    height: 175,
-    weight: 75,
-    activity_level: 'moderately_active' as const,
-    goals: ['weight_loss', 'muscle_gain', 'improve_fitness'],
-    dietary_restrictions: ['vegetarian'],
-    fitness_experience: 'intermediate' as const,
-    updated_at: '2024-01-01T00:00:00Z',
-  },
-
-  insights: [
-    {
-      id: '1',
-      user_id: '1',
-      type: 'progress' as const,
-      title: 'Great Progress This Week!',
-      message: 'Your consistency improved by 15% this week. You\'ve logged 6 out of 7 planned workouts.',
-      explanation: 'Based on your workout adherence and progressive overload data, your strength gains are accelerating.',
-      action_items: ['Continue current routine', 'Consider adding 5% more weight to compound exercises'],
-      created_at: '2024-01-01T00:00:00Z',
-      priority: 'high' as const,
-    },
-    {
-      id: '2',
-      user_id: '1',
-      type: 'nutrition' as const,
-      title: 'Protein Intake Optimization',
-      message: 'Your protein intake has been 20g below target for 3 days. Let\'s adjust your meal plan.',
-      explanation: 'Adequate protein is crucial for muscle recovery and growth, especially given your current training volume.',
-      action_items: ['Add a protein shake post-workout', 'Include more lean protein in lunch'],
-      created_at: '2024-01-01T00:00:00Z',
-      priority: 'medium' as const,
-    },
-  ],
-};

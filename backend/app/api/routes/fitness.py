@@ -1,28 +1,58 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from typing import List
 from datetime import datetime, timedelta
+from typing import List
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.dependencies import get_current_user
+from app.core.database import get_db
+from app.models.fitness import Exercise, FitnessPlan, Workout
 from app.models.user import User
-from app.models.fitness import FitnessPlan, Workout, Exercise
-from app.schemas.fitness import (
-    WorkoutPlanResponse,
-    WorkoutLogCreate,
-)
+from app.schemas.fitness import WorkoutLogCreate, WorkoutPlanResponse
 
 router = APIRouter()
+
+DAY_NAMES = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+
+
+def _exercise_to_dict(exercise: Exercise) -> dict:
+    return {
+        "id": str(exercise.id),
+        "name": exercise.name,
+        "sets": exercise.sets,
+        "reps": exercise.reps,
+        "duration": exercise.duration_seconds,
+        "rest_time": exercise.rest_time_seconds,
+        "instructions": exercise.instructions,
+        "muscle_groups": exercise.muscle_groups or [],
+        "equipment": exercise.equipment_required or [],
+    }
+
+def _workout_to_dict(workout: Workout, exercises: List[Exercise]) -> dict:
+    day_index = workout.day_of_week
+    day_name = DAY_NAMES[day_index] if 0 <= day_index < len(DAY_NAMES) else str(day_index)
+    return {
+        "day": day_name,
+        "type": workout.workout_type,
+        "duration": workout.duration_minutes,
+        "exercises": [_exercise_to_dict(ex) for ex in exercises],
+    }
 
 
 @router.get("/current-plan", response_model=WorkoutPlanResponse)
 async def get_current_workout_plan(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get user's current workout plan"""
-    # Get most recent plan
     result = await db.execute(
         select(FitnessPlan)
         .where(FitnessPlan.user_id == current_user.id)
@@ -30,40 +60,36 @@ async def get_current_workout_plan(
         .limit(1)
     )
     plan = result.scalar_one_or_none()
-    
+
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No workout plan found. Please generate one first."
+            detail="No workout plan found. Please generate one first.",
         )
-    
-    # Get workouts for this plan
+
     workouts_result = await db.execute(
-        select(Workout).where(Workout.fitness_plan_id == plan.id)
+        select(Workout)
+        .where(Workout.plan_id == plan.id)
+        .order_by(Workout.day_of_week, Workout.created_at)
     )
     workouts = workouts_result.scalars().all()
-    
-    # Get exercises for these workouts
-    workout_data = []
+
+    workout_data: List[dict] = []
     for workout in workouts:
         exercises_result = await db.execute(
-            select(Exercise).where(Exercise.workout_id == workout.id)
+            select(Exercise)
+            .where(Exercise.workout_id == workout.id)
+            .order_by(Exercise.exercise_order)
         )
         exercises = exercises_result.scalars().all()
-        
-        workout_data.append({
-            "day": workout.day_of_week.lower(),
-            "type": workout.workout_type,
-            "duration": workout.duration_minutes,
-            "exercises": [_exercise_to_dict(e) for e in exercises],
-        })
-    
+        workout_data.append(_workout_to_dict(workout, exercises))
+
     return {
         "id": str(plan.id),
         "user_id": str(plan.user_id),
         "week_start": plan.week_start.isoformat(),
         "workouts": workout_data,
-        "difficulty_level": plan.difficulty_level,
+        "difficulty_level": plan.difficulty_level or 0,
         "created_by_ai": plan.created_by_ai,
         "adaptation_reason": plan.adaptation_reason,
     }
@@ -72,71 +98,56 @@ async def get_current_workout_plan(
 @router.post("/generate", response_model=WorkoutPlanResponse)
 async def generate_workout_plan(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Generate a new AI-powered workout plan"""
-    # TODO: Integrate with LangChain agent for AI generation
-    
-    # Calculate week start (current Monday)
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
-    
-    # Create fitness plan
+
     plan = FitnessPlan(
         user_id=current_user.id,
         week_start=week_start,
         week_end=week_start + timedelta(days=6),
         difficulty_level=7,
         created_by_ai=True,
-        adaptation_reason="Initial plan based on your fitness level and goals"
+        adaptation_reason="Initial plan based on your fitness profile",
     )
-    
     db.add(plan)
+    await db.flush()
+
+    workouts = _create_sample_workouts(plan.id)
+    db.add_all(workouts)
+    await db.flush()
+
+    for workout in workouts:
+        exercises = _create_sample_exercises(workout.id, workout.workout_type)
+        db.add_all(exercises)
+
     await db.commit()
     await db.refresh(plan)
-    
-    # Create sample workouts
-    workouts = _create_sample_workouts(plan.id)
-    for workout in workouts:
-        db.add(workout)
-    
-    await db.commit()
-    
-    # Create exercises for workouts
-    for workout in workouts:
-        await db.refresh(workout)
-        exercises = _create_sample_exercises(workout.id, workout.workout_type)
-        for exercise in exercises:
-            db.add(exercise)
-    
-    await db.commit()
-    
-    # Fetch created workouts with exercises
+
     workouts_result = await db.execute(
-        select(Workout).where(Workout.fitness_plan_id == plan.id)
+        select(Workout)
+        .where(Workout.plan_id == plan.id)
+        .order_by(Workout.day_of_week, Workout.created_at)
     )
     created_workouts = workouts_result.scalars().all()
-    
-    workout_data = []
+
+    workout_data: List[dict] = []
     for workout in created_workouts:
         exercises_result = await db.execute(
-            select(Exercise).where(Exercise.workout_id == workout.id)
+            select(Exercise)
+            .where(Exercise.workout_id == workout.id)
+            .order_by(Exercise.exercise_order)
         )
         exercises = exercises_result.scalars().all()
-        
-        workout_data.append({
-            "day": workout.day_of_week.lower(),
-            "type": workout.workout_type,
-            "duration": workout.duration_minutes,
-            "exercises": [_exercise_to_dict(e) for e in exercises],
-        })
-    
+        workout_data.append(_workout_to_dict(workout, exercises))
+
     return {
         "id": str(plan.id),
         "user_id": str(plan.user_id),
-        "week_start": plan.week_start_date.isoformat(),
+        "week_start": plan.week_start.isoformat(),
         "workouts": workout_data,
-        "difficulty_level": plan.difficulty_level,
+        "difficulty_level": plan.difficulty_level or 0,
         "created_by_ai": plan.created_by_ai,
         "adaptation_reason": plan.adaptation_reason,
     }
@@ -146,141 +157,117 @@ async def generate_workout_plan(
 async def log_workout(
     workout_data: WorkoutLogCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Log a completed workout"""
-    # TODO: Implement workout logging
+    # TODO: Implement persistence once workout logging is supported
     return {"message": "Workout logged successfully"}
 
 
-def _exercise_to_dict(exercise: Exercise) -> dict:
-    """Convert exercise model to dict"""
-    return {
-        "id": str(exercise.id),
-        "name": exercise.name,
-        "sets": exercise.sets,
-        "reps": exercise.reps,
-        "duration": exercise.duration_seconds,
-        "rest_time": exercise.rest_seconds,
-        "instructions": exercise.instructions,
-        "muscle_groups": exercise.target_muscles or [],
-        "equipment": exercise.equipment_needed or [],
-    }
-
-
 def _create_sample_workouts(plan_id) -> List[Workout]:
-    """Create sample workouts"""
-    return [
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Monday",
-            workout_type="strength",
-            duration_minutes=45,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Tuesday",
-            workout_type="cardio",
-            duration_minutes=30,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Wednesday",
-            workout_type="strength",
-            duration_minutes=45,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Thursday",
-            workout_type="rest",
-            duration_minutes=0,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Friday",
-            workout_type="strength",
-            duration_minutes=45,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Saturday",
-            workout_type="cardio",
-            duration_minutes=30,
-        ),
-        Workout(
-            fitness_plan_id=plan_id,
-            day_of_week="Sunday",
-            workout_type="rest",
-            duration_minutes=0,
-        ),
+    presets = [
+        {"type": "strength", "name": "Strength Training", "duration": 45},
+        {"type": "cardio", "name": "Cardio Session", "duration": 30},
+        {"type": "strength", "name": "Lower Body Strength", "duration": 45},
+        {"type": "rest", "name": "Rest Day", "duration": 0},
+        {"type": "strength", "name": "Upper Body Strength", "duration": 45},
+        {"type": "cardio", "name": "Endurance Cardio", "duration": 30},
+        {"type": "rest", "name": "Recovery", "duration": 0},
     ]
+
+    workouts: List[Workout] = []
+    for index, preset in enumerate(presets):
+        workouts.append(
+            Workout(
+                plan_id=plan_id,
+                day_of_week=index,
+                workout_type=preset["type"],
+                name=preset["name"],
+                duration_minutes=preset["duration"],
+            )
+        )
+    return workouts
 
 
 def _create_sample_exercises(workout_id, workout_type: str) -> List[Exercise]:
-    """Create sample exercises based on workout type"""
     if workout_type == "strength":
         return [
             Exercise(
                 workout_id=workout_id,
+                exercise_order=1,
                 name="Barbell Squats",
                 sets=4,
                 reps=8,
-                rest_seconds=90,
-                instructions="Keep core tight, descend until thighs parallel to floor",
-                target_muscles=["Quadriceps", "Glutes", "Core"],
-                equipment_needed=["Barbell", "Squat Rack"],
+                rest_time_seconds=90,
+                instructions="Keep core tight, descend until thighs are parallel to the floor",
+                muscle_groups=["Quadriceps", "Glutes", "Core"],
+                equipment_required=["Barbell", "Squat Rack"],
             ),
             Exercise(
                 workout_id=workout_id,
+                exercise_order=2,
                 name="Bench Press",
                 sets=4,
                 reps=10,
-                rest_seconds=90,
+                rest_time_seconds=90,
                 instructions="Lower bar to chest, press up explosively",
-                target_muscles=["Chest", "Shoulders", "Triceps"],
-                equipment_needed=["Barbell", "Bench"],
+                muscle_groups=["Chest", "Shoulders", "Triceps"],
+                equipment_required=["Barbell", "Bench"],
             ),
             Exercise(
                 workout_id=workout_id,
+                exercise_order=3,
                 name="Bent-Over Rows",
                 sets=3,
                 reps=12,
-                rest_seconds=60,
+                rest_time_seconds=60,
                 instructions="Hinge at hips, pull bar to lower chest",
-                target_muscles=["Back", "Biceps", "Core"],
-                equipment_needed=["Barbell"],
+                muscle_groups=["Back", "Biceps", "Core"],
+                equipment_required=["Barbell"],
             ),
             Exercise(
                 workout_id=workout_id,
+                exercise_order=4,
                 name="Overhead Press",
                 sets=3,
                 reps=10,
-                rest_seconds=60,
+                rest_time_seconds=60,
                 instructions="Press weight overhead, keep core engaged",
-                target_muscles=["Shoulders", "Triceps", "Core"],
-                equipment_needed=["Barbell"],
+                muscle_groups=["Shoulders", "Triceps", "Core"],
+                equipment_required=["Barbell"],
             ),
         ]
-    elif workout_type == "cardio":
+    if workout_type == "cardio":
         return [
             Exercise(
                 workout_id=workout_id,
+                exercise_order=1,
                 name="Running",
                 duration_seconds=1200,
-                instructions="Maintain steady pace, focus on breathing",
-                target_muscles=["Legs", "Cardiovascular"],
-                equipment_needed=["None"],
+                instructions="Maintain a steady pace and focus on breathing",
+                muscle_groups=["Legs", "Cardiovascular"],
+                equipment_required=["None"],
             ),
             Exercise(
                 workout_id=workout_id,
+                exercise_order=2,
                 name="Jump Rope",
                 sets=3,
                 duration_seconds=180,
-                rest_seconds=60,
-                instructions="Keep elbows close to body, use wrists to rotate rope",
-                target_muscles=["Legs", "Shoulders", "Cardiovascular"],
-                equipment_needed=["Jump Rope"],
+                rest_time_seconds=60,
+                instructions="Keep elbows close to your body, use wrists to rotate the rope",
+                muscle_groups=["Full Body"],
+                equipment_required=["Jump Rope"],
             ),
         ]
-    else:
-        return []
+    # Stretching / recovery by default
+    return [
+        Exercise(
+            workout_id=workout_id,
+            exercise_order=1,
+            name="Active Stretching",
+            duration_seconds=600,
+            instructions="Focus on breathing and gentle movement",
+            muscle_groups=["Full Body"],
+            equipment_required=["None"],
+        )
+    ]

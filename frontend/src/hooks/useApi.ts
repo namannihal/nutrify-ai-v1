@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient, NutritionPlan, WorkoutPlan, ProgressEntry, AIInsight, UserProfile } from '@/services/api';
+import { apiClient, NutritionPlan, WorkoutPlan, ProgressEntry, ProgressEntryCreate, AIInsight, UserProfile } from '@/services/api';
 import { toast } from '@/components/ui/use-toast';
 
 // User Profile hooks
@@ -57,18 +57,23 @@ export const useGenerateNutritionPlan = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: () => apiClient.generateNutritionPlan(),
+    mutationFn: () => {
+      console.log('Attempting to generate nutrition plan...');
+      return apiClient.generateNutritionPlan();
+    },
     onSuccess: () => {
+      console.log('Nutrition plan generated successfully');
       queryClient.invalidateQueries({ queryKey: ['nutritionPlan'] });
       toast({
         title: 'Nutrition Plan Generated',
         description: 'Your personalized nutrition plan is ready!',
       });
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to generate nutrition plan:', error);
       toast({
         title: 'Generation Failed',
-        description: 'Failed to generate nutrition plan. Please try again.',
+        description: `Failed to generate nutrition plan: ${error instanceof Error ? error.message : 'Please try again.'}`,
         variant: 'destructive',
       });
     },
@@ -99,18 +104,23 @@ export const useGenerateWorkoutPlan = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: () => apiClient.generateWorkoutPlan(),
+    mutationFn: () => {
+      console.log('Attempting to generate workout plan...');
+      return apiClient.generateWorkoutPlan();
+    },
     onSuccess: () => {
+      console.log('Workout plan generated successfully');
       queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
       toast({
         title: 'Workout Plan Generated',
         description: 'Your personalized workout plan is ready!',
       });
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to generate workout plan:', error);
       toast({
         title: 'Generation Failed',
-        description: 'Failed to generate workout plan. Please try again.',
+        description: `Failed to generate workout plan: ${error instanceof Error ? error.message : 'Please try again.'}`,
         variant: 'destructive',
       });
     },
@@ -141,7 +151,7 @@ export const useLogProgress = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (progressData: Partial<ProgressEntry>) => apiClient.logProgress(progressData),
+    mutationFn: (progressData: ProgressEntryCreate) => apiClient.logProgress(progressData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['progressHistory'] });
       toast({

@@ -134,10 +134,10 @@ def _organize_meals_by_day(meals: List[Meal]) -> List[dict]:
     """Organize meals by day of week"""
     days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     organized = []
-    
-    for day in days:
-        day_meals = [m for m in meals if m.day_of_week.lower() == day]
-        
+
+    for day_index, day in enumerate(days):
+        day_meals = [m for m in meals if m.day_of_week == day_index]
+
         organized.append({
             "day": day,
             "breakfast": [_meal_to_dict(m) for m in day_meals if m.meal_type == "breakfast"],
@@ -145,7 +145,7 @@ def _organize_meals_by_day(meals: List[Meal]) -> List[dict]:
             "dinner": [_meal_to_dict(m) for m in day_meals if m.meal_type == "dinner"],
             "snacks": [_meal_to_dict(m) for m in day_meals if m.meal_type == "snack"],
         })
-    
+
     return organized
 
 
@@ -155,9 +155,9 @@ def _meal_to_dict(meal: Meal) -> dict:
         "id": str(meal.id),
         "name": meal.name,
         "calories": meal.calories,
-        "protein": meal.protein,
-        "carbs": meal.carbs,
-        "fat": meal.fat,
+        "protein": float(meal.protein_grams),
+        "carbs": float(meal.carbs_grams),
+        "fat": float(meal.fat_grams),
         "ingredients": meal.ingredients or [],
         "instructions": meal.instructions,
         "prep_time": meal.prep_time_minutes,
@@ -172,60 +172,60 @@ def _create_sample_meals(plan_id) -> List[Meal]:
     for day in days:
         # Breakfast
         meals.append(Meal(
-            nutrition_plan_id=plan_id,
-            day_of_week=day,
+            plan_id=plan_id,
+            day_of_week=days.index(day),  # Convert to 0-6 index
             meal_type="breakfast",
             name=f"Protein Oatmeal Bowl",
             calories=450,
-            protein=25,
-            carbs=55,
-            fat=12,
-            ingredients=["Oats", "Protein powder", "Banana", "Almond butter", "Berries"],
+            protein_grams=25,
+            carbs_grams=55,
+            fat_grams=12,
+            ingredients={"items": ["Oats", "Protein powder", "Banana", "Almond butter", "Berries"]},
             instructions="Mix oats with water, add protein powder, top with fruits and nut butter",
             prep_time_minutes=10,
         ))
         
         # Lunch
         meals.append(Meal(
-            nutrition_plan_id=plan_id,
-            day_of_week=day,
+            plan_id=plan_id,
+            day_of_week=days.index(day),  # Convert to 0-6 index
             meal_type="lunch",
             name=f"Grilled Chicken Salad",
             calories=520,
-            protein=45,
-            carbs=25,
-            fat=28,
-            ingredients=["Chicken breast", "Mixed greens", "Avocado", "Cherry tomatoes", "Olive oil"],
+            protein_grams=45,
+            carbs_grams=25,
+            fat_grams=28,
+            ingredients={"items": ["Chicken breast", "Mixed greens", "Avocado", "Cherry tomatoes", "Olive oil"]},
             instructions="Grill chicken, toss with greens and vegetables, drizzle with olive oil",
             prep_time_minutes=15,
         ))
         
         # Dinner
         meals.append(Meal(
-            nutrition_plan_id=plan_id,
-            day_of_week=day,
+            plan_id=plan_id,
+            day_of_week=days.index(day),  # Convert to 0-6 index
             meal_type="dinner",
             name=f"Salmon with Quinoa",
             calories=680,
-            protein=42,
-            carbs=45,
-            fat=32,
-            ingredients=["Salmon fillet", "Quinoa", "Broccoli", "Sweet potato", "Lemon"],
+            protein_grams=42,
+            carbs_grams=45,
+            fat_grams=32,
+            ingredients={"items": ["Salmon fillet", "Quinoa", "Broccoli", "Sweet potato", "Lemon"]},
             instructions="Bake salmon, cook quinoa, steam vegetables",
             prep_time_minutes=25,
         ))
         
         # Snack
         meals.append(Meal(
-            nutrition_plan_id=plan_id,
-            day_of_week=day,
+            plan_id=plan_id,
+            day_of_week=days.index(day),  # Convert to 0-6 index
             meal_type="snack",
             name=f"Greek Yogurt & Nuts",
             calories=280,
-            protein=20,
-            carbs=15,
-            fat=18,
-            ingredients=["Greek yogurt", "Mixed nuts", "Honey"],
+            protein_grams=20,
+            carbs_grams=15,
+            fat_grams=18,
+            ingredients={"items": ["Greek yogurt", "Mixed nuts", "Honey"]},
             instructions="Mix yogurt with nuts and a drizzle of honey",
             prep_time_minutes=2,
         ))

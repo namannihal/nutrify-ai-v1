@@ -35,9 +35,10 @@ import { useWorkoutPlan, useGenerateWorkoutPlan } from '@/hooks/useApi';
 interface Exercise {
   id: string;
   name: string;
-  sets: number;
-  reps: number;
-  rest_time: number;
+  sets?: number;
+  reps?: number;
+  duration?: number;
+  rest_time?: number;
   instructions: string;
   muscle_groups: string[];
   equipment: string[];
@@ -55,73 +56,16 @@ export default function FitnessPlan() {
   // Treat null data (404) as "no plan yet"
   const hasNoPlan = !workoutPlan && !isLoading;
 
-  // Mock fitness data as fallback
-  const weeklyPlan = workoutPlan || {
-    id: '1',
-    week_start: '2024-01-01',
-    difficulty_level: 7,
-    adaptation_reason: 'Increased intensity by 10% based on your consistent performance improvements',
-    created_by_ai: true,
-    user_id: '',
-    workouts: [],
-  };
+  const weeklyPlan = workoutPlan;
 
-  const workoutPlans = {
-    monday: {
-      type: 'strength' as const,
-      duration: 45,
-      exercises: [
-        {
-          id: '1',
-          name: 'Barbell Squats',
-          sets: 4,
-          reps: 8,
-          rest_time: 90,
-          instructions: 'Keep your core tight, descend until thighs are parallel to floor',
-          muscle_groups: ['Quadriceps', 'Glutes', 'Core'],
-          equipment: ['Barbell', 'Squat Rack'],
-        },
-        {
-          id: '2',
-          name: 'Bench Press',
-          sets: 4,
-          reps: 10,
-          rest_time: 90,
-          instructions: 'Lower bar to chest, press up explosively, maintain tight shoulder blades',
-          muscle_groups: ['Chest', 'Shoulders', 'Triceps'],
-          equipment: ['Barbell', 'Bench'],
-        },
-        {
-          id: '3',
-          name: 'Bent-Over Rows',
-          sets: 3,
-          reps: 12,
-          rest_time: 60,
-          instructions: 'Hinge at hips, pull bar to lower chest, squeeze shoulder blades',
-          muscle_groups: ['Back', 'Biceps', 'Core'],
-          equipment: ['Barbell'],
-        },
-        {
-          id: '4',
-          name: 'Overhead Press',
-          sets: 3,
-          reps: 10,
-          rest_time: 60,
-          instructions: 'Press bar overhead, keep core tight, full lockout at top',
-          muscle_groups: ['Shoulders', 'Triceps', 'Core'],
-          equipment: ['Barbell'],
-        },
-      ],
-    },
-  };
-
-  const weeklyProgress = {
-    workouts_completed: 4,
-    total_planned: 5,
-    total_duration: 180, // minutes
-    strength_improvement: 8.5,
-    consistency_score: 85,
-  };
+  // TODO: Calculate progress from actual workout data
+  const weeklyProgress = weeklyPlan?.workouts ? {
+    workouts_completed: 0, // TODO: Track completed workouts
+    total_planned: weeklyPlan.workouts.length,
+    total_duration: weeklyPlan.workouts.reduce((total, w) => total + (w.duration || 0), 0),
+    strength_improvement: 0, // TODO: Calculate based on performance metrics
+    consistency_score: 0, // TODO: Calculate based on completion rate
+  } : null;
 
   const days = [
     { key: 'monday', label: 'Mon', type: 'Upper Body' },
@@ -365,16 +309,16 @@ export default function FitnessPlan() {
             </TabsList>
 
             <TabsContent value={selectedDay} className="mt-6">
-              {workoutPlans[selectedDay as keyof typeof workoutPlans] ? (
+              {weeklyPlan?.workouts?.find(workout => workout.day?.toLowerCase() === selectedDay) ? (
                 <div className="space-y-6">
                   {/* Workout Header */}
                   <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
                     <div>
                       <h3 className="text-lg font-semibold capitalize">
-                        {workoutPlans[selectedDay as keyof typeof workoutPlans].type} Training
+                        {weeklyPlan.workouts.find(w => w.day?.toLowerCase() === selectedDay)?.type} Training
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        Estimated duration: {workoutPlans[selectedDay as keyof typeof workoutPlans].duration} minutes
+                        Estimated duration: {weeklyPlan.workouts.find(w => w.day?.toLowerCase() === selectedDay)?.duration} minutes
                       </p>
                     </div>
                     <Button
@@ -397,9 +341,11 @@ export default function FitnessPlan() {
 
                   {/* Exercise List */}
                   <div className="space-y-4">
-                    <h4 className="font-semibold">Exercises ({workoutPlans[selectedDay as keyof typeof workoutPlans].exercises.length})</h4>
+                    <h4 className="font-semibold">
+                      Exercises ({weeklyPlan.workouts.find(w => w.day?.toLowerCase() === selectedDay)?.exercises?.length || 0})
+                    </h4>
                     <div className="grid gap-4">
-                      {workoutPlans[selectedDay as keyof typeof workoutPlans].exercises.map((exercise, index) => (
+                      {weeklyPlan.workouts.find(w => w.day?.toLowerCase() === selectedDay)?.exercises?.map((exercise, index) => (
                         <div key={exercise.id} className="flex items-start gap-4">
                           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-medium">
                             {index + 1}
@@ -407,7 +353,7 @@ export default function FitnessPlan() {
                           <div className="flex-1">
                             <ExerciseCard 
                               exercise={exercise} 
-                              workoutType={workoutPlans[selectedDay as keyof typeof workoutPlans].type} 
+                              workoutType={weeklyPlan.workouts.find(w => w.day?.toLowerCase() === selectedDay)?.type || 'strength'} 
                             />
                           </div>
                         </div>

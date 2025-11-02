@@ -42,7 +42,11 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
-  const [notifications] = React.useState(3); // Mock notification count
+  // TODO: Replace with real notifications from backend
+  const [notifications] = React.useState(0);
+  const [showNotifications, setShowNotifications] = React.useState(false);
+
+  const notificationsList: any[] = [];
 
   const handleLogout = () => {
     logout();
@@ -183,14 +187,52 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
           <div className="flex items-center gap-x-4 lg:gap-x-6 ml-auto">
             {/* Notifications */}
-            <Button variant="outline" size="icon" className="relative">
-              <Bell className="h-4 w-4" />
-              {notifications > 0 && (
-                <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
-                  {notifications}
-                </Badge>
-              )}
-            </Button>
+            <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="relative">
+                  <Bell className="h-4 w-4" />
+                  {notifications > 0 && (
+                    <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+                      {notifications}
+                    </Badge>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-80" align="end">
+                <DropdownMenuLabel>
+                  <div className="flex items-center justify-between">
+                    <span>Notifications</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {notifications} new
+                    </Badge>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="max-h-64 overflow-y-auto">
+                  {notificationsList.length > 0 ? (
+                    notificationsList.map((notification) => (
+                      <DropdownMenuItem key={notification.id} className="flex-col items-start p-3">
+                        <div className="flex w-full items-start justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">{notification.title}</p>
+                            <p className="text-xs text-muted-foreground">{notification.message}</p>
+                            <p className="text-xs text-muted-foreground">{notification.time}</p>
+                          </div>
+                        </div>
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem className="text-center text-sm text-muted-foreground">
+                      No notifications yet
+                    </DropdownMenuItem>
+                  )}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-center text-sm text-muted-foreground">
+                  Mark all as read
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Profile dropdown */}
             <DropdownMenu>
