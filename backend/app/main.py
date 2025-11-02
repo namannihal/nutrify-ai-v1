@@ -60,11 +60,21 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://*.github.io",  # GitHub Pages
+    "https://nutrify-me.github.io",  # Your specific GitHub Pages domain
+]
+
+if settings.ENVIRONMENT == "development":
+    allowed_origins.append("*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
