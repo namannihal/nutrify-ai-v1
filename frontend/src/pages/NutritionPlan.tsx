@@ -41,7 +41,8 @@ interface Meal {
   carbs: number;
   fat: number;
   ingredients: string[];
-  prep_time: number;
+  instructions?: string;
+  prep_time?: number;
 }
 
 export default function NutritionPlan() {
@@ -52,77 +53,15 @@ export default function NutritionPlan() {
   // Treat null data (404) as "no plan yet"
   const hasNoPlan = !nutritionPlan && !isLoading;
 
-  // Use fetched data or fallback to mock
-  const weeklyPlan = nutritionPlan || {
-    id: '1',
-    week_start: '2024-01-01',
-    daily_calories: 2200,
-    macros: { protein: 165, carbs: 220, fat: 73 },
-    adaptation_reason: 'Increased protein by 15g based on your improved workout performance',
-    created_by_ai: true,
-    user_id: '',
-    meals: [],
-  };
+  const weeklyPlan = nutritionPlan;
 
-  const dailyMeals = {
-    monday: {
-      breakfast: [
-        {
-          id: '1',
-          name: 'Protein Oatmeal Bowl',
-          calories: 450,
-          protein: 25,
-          carbs: 55,
-          fat: 12,
-          ingredients: ['Oats', 'Protein powder', 'Banana', 'Almond butter', 'Berries'],
-          prep_time: 10,
-        },
-      ],
-      lunch: [
-        {
-          id: '2',
-          name: 'Grilled Chicken Salad',
-          calories: 520,
-          protein: 45,
-          carbs: 25,
-          fat: 28,
-          ingredients: ['Chicken breast', 'Mixed greens', 'Avocado', 'Cherry tomatoes', 'Olive oil'],
-          prep_time: 15,
-        },
-      ],
-      dinner: [
-        {
-          id: '3',
-          name: 'Salmon with Quinoa',
-          calories: 680,
-          protein: 42,
-          carbs: 45,
-          fat: 32,
-          ingredients: ['Salmon fillet', 'Quinoa', 'Broccoli', 'Sweet potato', 'Lemon'],
-          prep_time: 25,
-        },
-      ],
-      snacks: [
-        {
-          id: '4',
-          name: 'Greek Yogurt & Nuts',
-          calories: 280,
-          protein: 20,
-          carbs: 15,
-          fat: 18,
-          ingredients: ['Greek yogurt', 'Mixed nuts', 'Honey'],
-          prep_time: 2,
-        },
-      ],
-    },
-  };
-
-  const todayProgress = {
-    calories: { consumed: 1450, target: 2200 },
-    protein: { consumed: 85, target: 165 },
-    carbs: { consumed: 140, target: 220 },
-    fat: { consumed: 45, target: 73 },
-  };
+  // TODO: Calculate today's progress from logged meals
+  const todayProgress = weeklyPlan ? {
+    calories: { consumed: 0, target: weeklyPlan.daily_calories },
+    protein: { consumed: 0, target: weeklyPlan.macros.protein },
+    carbs: { consumed: 0, target: weeklyPlan.macros.carbs },
+    fat: { consumed: 0, target: weeklyPlan.macros.fat },
+  } : null;
 
   const days = [
     { key: 'monday', label: 'Mon' },
@@ -339,9 +278,13 @@ export default function NutritionPlan() {
                     Breakfast
                   </h3>
                   <div className="grid gap-3">
-                    {dailyMeals[selectedDay as keyof typeof dailyMeals]?.breakfast.map((meal) => (
+                    {weeklyPlan?.meals?.find(meal => meal.day?.toLowerCase() === selectedDay)?.breakfast?.map((meal) => (
                       <MealCard key={meal.id} meal={meal} mealType="breakfast" />
-                    ))}
+                    )) || (
+                      <div className="text-center py-8 text-gray-500">
+                        No breakfast meals planned for {selectedDay}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -352,9 +295,13 @@ export default function NutritionPlan() {
                     Lunch
                   </h3>
                   <div className="grid gap-3">
-                    {dailyMeals[selectedDay as keyof typeof dailyMeals]?.lunch.map((meal) => (
+                    {weeklyPlan?.meals?.find(meal => meal.day?.toLowerCase() === selectedDay)?.lunch?.map((meal) => (
                       <MealCard key={meal.id} meal={meal} mealType="lunch" />
-                    ))}
+                    )) || (
+                      <div className="text-center py-8 text-gray-500">
+                        No lunch meals planned for {selectedDay}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -365,9 +312,13 @@ export default function NutritionPlan() {
                     Dinner
                   </h3>
                   <div className="grid gap-3">
-                    {dailyMeals[selectedDay as keyof typeof dailyMeals]?.dinner.map((meal) => (
+                    {weeklyPlan?.meals?.find(meal => meal.day?.toLowerCase() === selectedDay)?.dinner?.map((meal) => (
                       <MealCard key={meal.id} meal={meal} mealType="dinner" />
-                    ))}
+                    )) || (
+                      <div className="text-center py-8 text-gray-500">
+                        No dinner meals planned for {selectedDay}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -378,9 +329,13 @@ export default function NutritionPlan() {
                     Snacks
                   </h3>
                   <div className="grid gap-3">
-                    {dailyMeals[selectedDay as keyof typeof dailyMeals]?.snacks.map((meal) => (
+                    {weeklyPlan?.meals?.find(meal => meal.day?.toLowerCase() === selectedDay)?.snacks?.map((meal) => (
                       <MealCard key={meal.id} meal={meal} mealType="snack" />
-                    ))}
+                    )) || (
+                      <div className="text-center py-8 text-gray-500">
+                        No snacks planned for {selectedDay}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

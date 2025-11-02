@@ -58,29 +58,8 @@ export default function Landing() {
     }
   ];
 
-  const testimonials = [
-    {
-      name: "Sarah Chen",
-      role: "Fitness Enthusiast",
-      avatar: "/avatars/sarah.jpg",
-      content: "Nutrify-AI transformed my approach to fitness. The AI coach feels like having a personal trainer 24/7!",
-      rating: 5
-    },
-    {
-      name: "Marcus Johnson",
-      role: "Busy Professional",
-      avatar: "/avatars/marcus.jpg", 
-      content: "Finally, a health app that adapts to my crazy schedule. The meal plans are spot-on and realistic.",
-      rating: 5
-    },
-    {
-      name: "Elena Rodriguez",
-      role: "Wellness Coach",
-      avatar: "/avatars/elena.jpg",
-      content: "The AI insights are incredibly accurate. It's like having a nutrition scientist in your pocket.",
-      rating: 5
-    }
-  ];
+  // TODO: Load real testimonials from API
+  const testimonials: any[] = [];
 
   const stats = [
     { number: "50K+", label: "Active Users" },

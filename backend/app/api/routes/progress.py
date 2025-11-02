@@ -35,22 +35,7 @@ async def get_progress_history(
     )
     entries = result.scalars().all()
     
-    return [
-        {
-            "id": str(entry.id),
-            "user_id": str(entry.user_id),
-            "date": entry.entry_date.isoformat(),
-            "weight": float(entry.weight) if entry.weight else None,
-            "body_fat": float(entry.body_fat_percentage) if entry.body_fat_percentage else None,
-            "measurements": entry.measurements or {},
-            "mood": entry.mood_rating,
-            "energy": entry.energy_rating,
-            "sleep_hours": float(entry.sleep_hours) if entry.sleep_hours else 0,
-            "water_intake": entry.water_intake_ml or 0,
-            "adherence_score": entry.adherence_score or 0,
-        }
-        for entry in entries
-    ]
+    return entries
 
 
 @router.post("", response_model=ProgressEntryResponse)
@@ -61,11 +46,11 @@ async def log_progress(
 ):
     """Log a new progress entry"""
     # Check if entry already exists for today
-    today = datetime.now().date()
+    entry_date = progress_data.entry_date or datetime.now().date()
     result = await db.execute(
         select(ProgressEntry).where(
             ProgressEntry.user_id == current_user.id,
-            ProgressEntry.entry_date == today
+            ProgressEntry.entry_date == entry_date
         )
     )
     existing_entry = result.scalar_one_or_none()
@@ -74,53 +59,58 @@ async def log_progress(
         # Update existing entry
         update_data = progress_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
-            if field == "weight" and value:
+            if field == "entry_date" and value is not None:
+                existing_entry.entry_date = value
+            elif field == "weight" and value is not None:
                 existing_entry.weight = value
-            elif field == "body_fat" and value:
+            elif field == "body_fat_percentage" and value is not None:
                 existing_entry.body_fat_percentage = value
-            elif field == "measurements" and value:
+            elif field == "muscle_mass" and value is not None:
+                existing_entry.muscle_mass = value
+            elif field == "measurements" and value is not None:
                 existing_entry.measurements = value
-            elif field == "mood" and value:
-                existing_entry.mood_rating = value
-            elif field == "energy" and value:
-                existing_entry.energy_rating = value
-            elif field == "sleep_hours" and value:
+            elif field == "mood_score" and value is not None:
+                existing_entry.mood_score = value
+            elif field == "energy_score" and value is not None:
+                existing_entry.energy_score = value
+            elif field == "stress_score" and value is not None:
+                existing_entry.stress_score = value
+            elif field == "sleep_hours" and value is not None:
                 existing_entry.sleep_hours = value
-            elif field == "water_intake" and value:
+            elif field == "sleep_quality" and value is not None:
+                existing_entry.sleep_quality = value
+            elif field == "water_intake_ml" and value is not None:
                 existing_entry.water_intake_ml = value
-            elif field == "adherence_score" and value:
+            elif field == "adherence_score" and value is not None:
                 existing_entry.adherence_score = value
+            elif field == "notes" and value is not None:
+                existing_entry.notes = value
+            elif field == "photos" and value is not None:
+                existing_entry.photos = value
         
         entry = existing_entry
     else:
         # Create new entry
         entry = ProgressEntry(
             user_id=current_user.id,
-            entry_date=today,
+            entry_date=entry_date,
             weight=progress_data.weight,
-            body_fat_percentage=progress_data.body_fat,
+            body_fat_percentage=progress_data.body_fat_percentage,
+            muscle_mass=progress_data.muscle_mass,
             measurements=progress_data.measurements,
-            mood_rating=progress_data.mood,
-            energy_rating=progress_data.energy,
+            mood_score=progress_data.mood_score,
+            energy_score=progress_data.energy_score,
+            stress_score=progress_data.stress_score,
             sleep_hours=progress_data.sleep_hours,
-            water_intake_ml=progress_data.water_intake,
+            sleep_quality=progress_data.sleep_quality,
+            water_intake_ml=progress_data.water_intake_ml,
             adherence_score=progress_data.adherence_score,
+            notes=progress_data.notes,
+            photos=progress_data.photos,
         )
         db.add(entry)
     
     await db.commit()
     await db.refresh(entry)
     
-    return {
-        "id": str(entry.id),
-        "user_id": str(entry.user_id),
-        "date": entry.entry_date.isoformat(),
-        "weight": float(entry.weight) if entry.weight else None,
-        "body_fat": float(entry.body_fat_percentage) if entry.body_fat_percentage else None,
-        "measurements": entry.measurements or {},
-        "mood": entry.mood_rating,
-        "energy": entry.energy_rating,
-        "sleep_hours": float(entry.sleep_hours) if entry.sleep_hours else 0,
-        "water_intake": entry.water_intake_ml or 0,
-        "adherence_score": entry.adherence_score or 0,
-    }
+    return entry
