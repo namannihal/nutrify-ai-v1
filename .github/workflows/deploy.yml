@@ -3,12 +3,17 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - name: Checkout
@@ -34,11 +39,21 @@ jobs:
         cd frontend
         pnpm build
       env:
-        VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        VITE_API_URL: ${{ secrets.VITE_API_URL || 'http://localhost:8000/api/v1' }}
+        
+    - name: Check build output
+      run: |
+        ls -la frontend/
+        ls -la frontend/dist/ || echo "No dist directory found"
+        
+    - name: Setup Pages
+      uses: actions/configure-pages@v3
+      
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: ./frontend/dist
         
     - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      if: github.ref == 'refs/heads/main'
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./frontend/dist
+      id: deployment
+      uses: actions/deploy-pages@v2
