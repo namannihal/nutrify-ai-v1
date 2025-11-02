@@ -1,0 +1,54 @@
+# Global
+.DS_Store
+node_modules/
+.env*
+*.log
+
+# Python (backend)
+backend/.venv/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/**/*.pyc
+backend/app/**/*.pyo
+backend/app/**/*.pyd
+backend/app/**/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/.cache/
+backend/.vscode/
+backend/.idea/
+backend/.pylint.d/
+backend/.pdm.toml
+backend/.pdm.lock
+backend/.ruff_cache/
+
+# TypeScript/React (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+frontend/.vercel/
+frontend/.vscode/
+frontend/.idea/
+frontend/.cache/
+frontend/pnpm-lock.yaml
+frontend/.eslintcache
+frontend/.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/Editor
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+*.bak
+*.tmp
+*.orig
