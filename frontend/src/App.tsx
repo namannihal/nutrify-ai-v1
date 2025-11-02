@@ -78,7 +78,7 @@ const DashboardRoute = ({ children }: { children: React.ReactNode }) => {
 const App = () => (
   <TooltipProvider>
     <Toaster />
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.PROD ? '/nutrify-ai-v1' : ''}>
       <Routes>
         {/* Landing Page */}
         <Route path="/" element={<LandingRoute />} />
