@@ -38,23 +38,23 @@ export default function Landing() {
   const features = [
     {
       icon: Brain,
-      title: "AI-Powered Coaching",
-      description: "Your personal AI coach that learns and adapts to your unique needs and preferences."
+      title: "Agentic AI Coach",
+      description: "An autonomous AI agent that actively monitors, analyzes, and adjusts your health plan without constant input."
     },
     {
       icon: Target,
-      title: "Personalized Plans",
-      description: "Custom nutrition and fitness plans tailored to your goals, lifestyle, and dietary preferences."
+      title: "Agent-Driven Plans",
+      description: "Your AI agent creates and continuously refines personalized nutrition and fitness strategies based on real-time data."
     },
     {
       icon: TrendingUp,
-      title: "Smart Analytics",
-      description: "Advanced progress tracking with insights that help you optimize your health journey."
+      title: "Autonomous Analytics",
+      description: "Advanced AI agent that independently tracks patterns and provides proactive insights for optimal results."
     },
     {
       icon: Zap,
-      title: "Real-time Adaptation",
-      description: "Plans that evolve with your progress, ensuring continuous improvement and results."
+      title: "Self-Optimizing Agent",
+      description: "Your AI agent works around the clock to optimize your plans, making intelligent adjustments automatically."
     }
   ];
 
@@ -62,10 +62,10 @@ export default function Landing() {
   const testimonials: any[] = [];
 
   const stats = [
-    { number: "50K+", label: "Active Users" },
-    { number: "95%", label: "Success Rate" },
-    { number: "4.9", label: "App Rating" },
-    { number: "24/7", label: "AI Support" }
+    { number: "0+", label: "Early Users" },
+    { number: "New", label: "Platform" },
+    { number: "AI", label: "Agent Powered" },
+    { number: "24/7", label: "Agent Support" }
   ];
 
   return (
@@ -118,23 +118,23 @@ export default function Landing() {
               <div className="space-y-4">
                 <Badge variant="secondary" className="gap-2">
                   <Sparkles className="h-3 w-3" />
-                  AI-Powered Health Platform
+                  Agentic AI Health Platform
                 </Badge>
                 
                 <h1 className="text-5xl lg:text-7xl font-bold leading-tight">
                   Your{' '}
                   <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
-                    AI Health
+                    AI Agent
                   </span>{' '}
-                  Journey{' '}
+                  Health{' '}
                   <span className="bg-gradient-to-r from-green-500 to-blue-500 bg-clip-text text-transparent">
-                    Starts Here
+                    Revolution
                   </span>
                 </h1>
                 
                 <p className="text-xl text-gray-600 leading-relaxed max-w-lg">
-                  Transform your fitness and nutrition with an adaptive AI coach that learns, 
-                  evolves, and guides you toward measurable results every single day.
+                  Meet your autonomous health agent that thinks, learns, and evolves with you. 
+                  Our agentic AI doesn't just follow rules—it creates personalized strategies that adapt in real-time.
                 </p>
               </div>
 
