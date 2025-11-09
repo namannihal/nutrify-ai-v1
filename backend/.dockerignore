@@ -1,0 +1,77 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Alembic (keep migrations)
+# alembic.ini is needed, versions are needed
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml

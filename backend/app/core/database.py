@@ -11,6 +11,16 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
+# Prepare connect_args for Supabase SSL requirement
+connect_args = {}
+if "supabase.co" in settings.DATABASE_URL:
+    connect_args = {
+        "ssl": "require",
+        "server_settings": {
+            "application_name": "nutrify-backend"
+        }
+    }
+
 # Create async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -19,6 +29,7 @@ engine = create_async_engine(
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
     poolclass=NullPool if settings.ENVIRONMENT == "test" else None,
+    connect_args=connect_args,
 )
 
 # Create async session factory
