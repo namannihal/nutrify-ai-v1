@@ -1,0 +1,23 @@
+```mermaid
+graph TB
+    subgraph "Initial Setup"
+        A[Install Flutter] --> B[Setup IDE]
+        B --> C[Clone Repository]
+        C --> D[Get Dependencies]
+    end
+
+    subgraph "iOS Development"
+        E[Install Xcode] --> F[Setup CocoaPods]
+        F --> G[Pod Install]
+        G --> H[Run on Simulator/Device]
+    end
+
+    subgraph "Android Development"
+        I[Install Android Studio] --> J[Setup Android SDK]
+        J --> K[Create Emulator]
+        K --> L[Run on Emulator/Device]
+    end
+
+    D --> E
+    D --> I
+```

@@ -1,0 +1,13 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+ios/Flutter/Flutter.framework
+android/.gradle
+
+# macOS
+.DS_Store
+
+# Visual Studio Code
+.vscode/
