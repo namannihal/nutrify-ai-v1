@@ -11,9 +11,9 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-# Prepare connect_args for Supabase SSL requirement
+# Prepare connect_args for SSL requirement (Supabase & Azure Postgres)
 connect_args = {}
-if "supabase.co" in settings.DATABASE_URL:
+if "supabase.co" in settings.DATABASE_URL or "postgres.database.azure.com" in settings.DATABASE_URL:
     connect_args = {
         "ssl": "require",
         "server_settings": {
