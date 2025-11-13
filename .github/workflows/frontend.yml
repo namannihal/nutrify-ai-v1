@@ -1,16 +1,12 @@
 name: Frontend CI/CD
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/frontend.yml'
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'frontend/**'
   workflow_dispatch:
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
 
 env:
   NODE_VERSION: '20'
@@ -80,16 +76,18 @@ jobs:
   build:
     needs: [test, lint]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Login to Azure
+      - name: Login to Azure using OIDC
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to ACR
         run: az acr login --name ${{ secrets.ACR_NAME }}
@@ -105,16 +103,18 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     environment:
       name: production
       url: https://${{ steps.get-url.outputs.frontend_url }}
     
     steps:
-      - name: Login to Azure
+      - name: Login to Azure using OIDC
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Container Apps
         run: |

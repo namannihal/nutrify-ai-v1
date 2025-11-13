@@ -3,11 +3,15 @@ FROM node:20-alpine AS build-stage
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+# Copy package files (pnpm lockfile used)
+COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies using pnpm (project uses pnpm)
+# Use Corepack to activate pnpm and install with frozen lockfile
+RUN corepack enable && \
+    corepack prepare pnpm@8.10.0 --activate && \
+    # Install dev dependencies so the build tooling (vite) is available
+    pnpm install --frozen-lockfile
 
 # Copy source code
 COPY . .
@@ -20,6 +24,15 @@ FROM nginx:1.25-alpine AS production-stage
 
 # Copy built assets from build stage
 COPY --from=build-stage /app/dist /usr/share/nginx/html
+
+# Ensure that any static public assets (images/icons) are also copied into the
+# production image root. Vite copies `public/` to `dist/` in most setups, but
+# copying `public/` explicitly prevents missing-files when `base` or plugins
+# changed the output layout. Also copy public images to both `/images` and
+# `/icons` to support different asset paths without needing to regenerate the
+# build.
+COPY public/ /usr/share/nginx/html/
+RUN if [ -d /usr/share/nginx/html/images ]; then cp -r /usr/share/nginx/html/images /usr/share/nginx/html/icons || true; fi
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf

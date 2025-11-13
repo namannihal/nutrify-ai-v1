@@ -5,9 +5,21 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies required to build wheels (compilers, headers, tooling)
 RUN apt-get update && apt-get install -y \
+    build-essential \
     gcc \
+    g++ \
+    make \
+    ca-certificates \
+    curl \
+    git \
+    pkg-config \
+    cmake \
+    libpq-dev \
+    libssl-dev \
+    libffi-dev \
+    libgomp1 \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,6 +28,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
+
+# Copy package sources and README required by hatchling during build
+# (hatchling needs the project's README and package code to build editable wheel)
+COPY README.md ./
+COPY app ./app
 
 # Install dependencies
 RUN uv sync --frozen --no-dev
