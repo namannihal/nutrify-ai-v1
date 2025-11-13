@@ -1,22 +1,22 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: nutrify_ai
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: nutrify123
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d nutrify_ai"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # PostgreSQL Database - COMMENTED OUT (Using Supabase instead)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: nutrify_ai
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: nutrify123
+  #   ports:
+  #     - "5433:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d nutrify_ai"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   # Redis Cache
   redis:
@@ -30,6 +30,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - nutrify-network
 
   backend:
     build:
@@ -44,10 +46,10 @@ services:
     #   - ./backend/app:/app/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
+    # Use host network to access external services like Supabase
+    network_mode: "host"
 
   frontend:
     build:
@@ -62,7 +64,13 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    networks:
+      - nutrify-network
+
+networks:
+  nutrify-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
+  # postgres_data:  # Commented out since using Supabase
   redis_data:
