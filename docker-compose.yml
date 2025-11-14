@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database - COMMENTED OUT (Using Supabase instead)
   # postgres:
@@ -19,24 +17,26 @@ services:
   #     retries: 5
 
   # Redis Cache
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6380:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 5
-  #   networks:
-  #     - nutrify-network
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - nutrify-network
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
@@ -53,6 +53,11 @@ services:
         condition: service_healthy
     networks:
       - nutrify-network
+    # Add DNS servers for reliable IPv4 + IPv6 resolution
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 2001:4860:4860::8888
 
   # frontend:
   #   build:
@@ -72,8 +77,14 @@ services:
 
 networks:
   nutrify-network:
+    enable_ipv6: true
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+        - subnet: fd00::/80
 
 volumes:
-  # postgres_data:  # Commented out since using Supabase
-  # redis_data:
+  # postgres_data:  # Commented out since using Neon
+  redis_data:
