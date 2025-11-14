@@ -19,19 +19,19 @@ services:
   #     retries: 5
 
   # Redis Cache
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - nutrify-network
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6380:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   networks:
+  #     - nutrify-network
 
   backend:
     build:
@@ -41,6 +41,9 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      # Override Redis URL to use Docker service name
+      - REDIS_URL=redis://redis:6379/0
     # For local development with hot-reload, uncomment the next line:
     # volumes:
     #   - ./backend/app:/app/app
@@ -48,24 +51,24 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # Use host network to access external services like Supabase
-    network_mode: "host"
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
     networks:
       - nutrify-network
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8000
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - nutrify-network
 
 networks:
   nutrify-network:
@@ -73,4 +76,4 @@ networks:
 
 volumes:
   # postgres_data:  # Commented out since using Supabase
-  redis_data:
+  # redis_data:
