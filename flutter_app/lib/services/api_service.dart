@@ -21,7 +21,8 @@ class ApiException implements Exception {
 }
 
 class ApiService {
-  static const String _baseUrl = 'http://localhost:8000/api/v1';
+  // Use 10.0.2.2 for Android emulator to access host machine's localhost
+  static const String _baseUrl = 'http://10.0.2.2:8000/api/v1';
   static const String _storageKeyToken = 'auth_token';
   static const String _storageKeyRefreshToken = 'refresh_token';
   

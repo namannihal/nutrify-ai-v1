@@ -1,35 +1,37 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: nutrify_ai
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: nutrify123
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d nutrify_ai"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # PostgreSQL Database - COMMENTED OUT (Using Supabase instead)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: nutrify_ai
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: nutrify123
+  #   ports:
+  #     - "5433:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d nutrify_ai"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   # Redis Cache
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6380:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   networks:
+  #     - nutrify-network
 
   backend:
     build:
@@ -39,30 +41,39 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      # Override Redis URL to use Docker service name
+      - REDIS_URL=redis://redis:6379/0
     # For local development with hot-reload, uncomment the next line:
     # volumes:
     #   - ./backend/app:/app/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - nutrify-network
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8000
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - nutrify-network
+
+networks:
+  nutrify-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  # postgres_data:  # Commented out since using Supabase
+  # redis_data:
