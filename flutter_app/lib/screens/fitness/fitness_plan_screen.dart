@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/fitness_provider.dart';
+import '../../models/fitness.dart';
 import '../../widgets/common/loading_overlay.dart';
 
 class FitnessPlanScreen extends ConsumerStatefulWidget {
@@ -22,6 +23,35 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
   @override
   Widget build(BuildContext context) {
     final fitnessState = ref.watch(fitnessNotifierProvider);
+    final currentPlan = fitnessState.currentPlan;
+    
+    // Get today's workout - DailyWorkout contains a list of workouts
+    final today = DateTime.now().weekday;
+    DailyWorkout? todaysWorkouts;
+    
+    if (currentPlan?.workouts != null) {
+      try {
+        todaysWorkouts = currentPlan!.workouts.firstWhere(
+          (dailyWorkout) => _getDayNumber(dailyWorkout.day) == today,
+        );
+      } catch (e) {
+        // No workout for today, use first one if available
+        if (currentPlan!.workouts.isNotEmpty) {
+          todaysWorkouts = currentPlan.workouts.first;
+        }
+      }
+    }
+    
+    // Get the first workout for today (if any)
+    final firstWorkout = todaysWorkouts?.workouts.isNotEmpty == true 
+        ? todaysWorkouts!.workouts.first 
+        : null;
+    
+    // TODO: Get actual weekly stats from workout logs
+    final completedWorkouts = 0;
+    final targetWorkouts = currentPlan?.workouts.where((dw) => dw.workouts.isNotEmpty).length ?? 4;
+    final totalDuration = 0.0;
+    final caloriesBurned = 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -59,9 +89,9 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          _buildStatColumn(context, 'Workouts', '3', '/ 4', Colors.blue),
-                          _buildStatColumn(context, 'Duration', '2.5h', 'this week', Colors.green),
-                          _buildStatColumn(context, 'Calories', '1,247', 'burned', Colors.orange),
+                          _buildStatColumn(context, 'Workouts', completedWorkouts.toString(), '/ $targetWorkouts', Colors.blue),
+                          _buildStatColumn(context, 'Duration', '${totalDuration.toStringAsFixed(1)}h', 'this week', Colors.green),
+                          _buildStatColumn(context, 'Calories', caloriesBurned.toString(), 'burned', Colors.orange),
                         ],
                       ),
                     ],
@@ -81,72 +111,131 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
               
               const SizedBox(height: 16),
               
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Lower Body Strength',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '50 minutes • 8 exercises',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                          ElevatedButton(
-                            onPressed: () {
-                              // TODO: Start workout
-                            },
-                            child: const Text('Start'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      const Divider(),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Exercises',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
+              if (currentPlan == null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.fitness_center,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.outline,
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        Text(
+                          'No workout plan yet',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Generate your personalized workout plan from the dashboard',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
               
-              const SizedBox(height: 16),
+              if (firstWorkout != null)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  firstWorkout.name,
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${firstWorkout.durationMinutes} minutes • ${firstWorkout.exercises.length} exercises',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            ElevatedButton(
+                              onPressed: () {
+                                // TODO: Start workout
+                              },
+                              child: const Text('Start'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Exercises',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               
-              // Exercise List
-              _buildExerciseCard(context, 'Squats', '3 sets × 12 reps', Icons.fitness_center),
-              const SizedBox(height: 12),
-              _buildExerciseCard(context, 'Lunges', '3 sets × 10 each leg', Icons.fitness_center),
-              const SizedBox(height: 12),
-              _buildExerciseCard(context, 'Deadlifts', '3 sets × 8 reps', Icons.fitness_center),
-              const SizedBox(height: 12),
-              _buildExerciseCard(context, 'Hip Thrusts', '3 sets × 15 reps', Icons.fitness_center),
-              const SizedBox(height: 12),
-              _buildExerciseCard(context, 'Calf Raises', '3 sets × 20 reps', Icons.fitness_center),
+              if (firstWorkout != null)
+                const SizedBox(height: 16),
+              
+              if (firstWorkout != null)
+                ...firstWorkout.exercises.map((exercise) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildExerciseCard(
+                    context, 
+                    exercise.name,
+                    '${exercise.sets ?? 0} sets × ${exercise.reps ?? 0} reps',
+                    Icons.fitness_center,
+                  ),
+                )).toList(),
+              
+              if (currentPlan != null && firstWorkout == null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Text(
+                      'Rest day - no workout scheduled',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  int _getDayNumber(String day) {
+    const days = {
+      'monday': 1,
+      'tuesday': 2,
+      'wednesday': 3,
+      'thursday': 4,
+      'friday': 5,
+      'saturday': 6,
+      'sunday': 7,
+    };
+    return days[day.toLowerCase()] ?? 1;
   }
 
   Widget _buildStatColumn(BuildContext context, String label, String value, String subtitle, Color color) {

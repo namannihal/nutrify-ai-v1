@@ -32,6 +32,7 @@ UserProfile _$UserProfileFromJson(Map<String, dynamic> json) => UserProfile(
   height: (json['height'] as num?)?.toDouble(),
   weight: (json['weight'] as num?)?.toDouble(),
   activityLevel: json['activity_level'] as String?,
+  primaryGoal: json['primary_goal'] as String?,
   goals: (json['goals'] as List<dynamic>?)?.map((e) => e as String).toList(),
   dietaryRestrictions: (json['dietary_restrictions'] as List<dynamic>?)
       ?.map((e) => e as String)
@@ -51,6 +52,7 @@ Map<String, dynamic> _$UserProfileToJson(UserProfile instance) =>
       'height': instance.height,
       'weight': instance.weight,
       'activity_level': instance.activityLevel,
+      'primary_goal': instance.primaryGoal,
       'goals': instance.goals,
       'dietary_restrictions': instance.dietaryRestrictions,
       'fitness_experience': instance.fitnessExperience,

@@ -1,11 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/progress_provider.dart';
 
 class ProgressScreen extends ConsumerWidget {
   const ProgressScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final progressState = ref.watch(progressNotifierProvider);
+    final profile = ref.watch(authNotifierProvider).profile;
+    
+    // Get latest entry for current stats
+    final latestEntry = progressState.entries.isNotEmpty 
+        ? progressState.entries.first 
+        : null;
+    
+    // Calculate changes (comparing latest to second latest)
+    final weightChange = _calculateChange(
+      progressState.entries.map((e) => e.weight).toList(),
+    );
+    final bodyFatChange = _calculateChange(
+      progressState.entries.map((e) => e.bodyFatPercentage).toList(),
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text('Progress'),
@@ -30,8 +47,12 @@ class ProgressScreen extends ConsumerWidget {
                   child: _buildSummaryCard(
                     context,
                     'Weight',
-                    '72.5 kg',
-                    '-2.3 kg',
+                    latestEntry?.weight != null 
+                        ? '${latestEntry!.weight!.toStringAsFixed(1)} kg'
+                        : profile?.weight != null
+                            ? '${profile!.weight!.toStringAsFixed(1)} kg'
+                            : '--',
+                    weightChange != null ? '${weightChange >= 0 ? '+' : ''}${weightChange.toStringAsFixed(1)} kg' : '--',
                     Icons.monitor_weight,
                     Colors.blue,
                   ),
@@ -41,8 +62,10 @@ class ProgressScreen extends ConsumerWidget {
                   child: _buildSummaryCard(
                     context,
                     'Body Fat',
-                    '15.2%',
-                    '-1.8%',
+                    latestEntry?.bodyFatPercentage != null 
+                        ? '${latestEntry!.bodyFatPercentage!.toStringAsFixed(1)}%'
+                        : '--',
+                    bodyFatChange != null ? '${bodyFatChange >= 0 ? '+' : ''}${bodyFatChange.toStringAsFixed(1)}%' : '--',
                     Icons.straighten,
                     Colors.orange,
                   ),
@@ -93,11 +116,62 @@ class ProgressScreen extends ConsumerWidget {
             
             const SizedBox(height: 16),
             
-            _buildProgressEntry(context, 'Today', 'Weight: 72.5 kg', 'Body Fat: 15.2%'),
-            const SizedBox(height: 12),
-            _buildProgressEntry(context, 'Yesterday', 'Weight: 72.7 kg', 'Body Fat: 15.3%'),
-            const SizedBox(height: 12),
-            _buildProgressEntry(context, '2 days ago', 'Weight: 72.9 kg', 'Body Fat: 15.4%'),
+            if (progressState.entries.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.timeline,
+                        size: 64,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No progress entries yet',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap the + button to log your first entry',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...progressState.entries.take(5).map((entry) {
+                final date = DateTime.parse(entry.entryDate);
+                final now = DateTime.now();
+                final difference = now.difference(date).inDays;
+                
+                String dateText;
+                if (difference == 0) {
+                  dateText = 'Today';
+                } else if (difference == 1) {
+                  dateText = 'Yesterday';
+                } else {
+                  dateText = '$difference days ago';
+                }
+                
+                final weightText = entry.weight != null 
+                    ? 'Weight: ${entry.weight!.toStringAsFixed(1)} kg' 
+                    : 'No weight data';
+                final bodyFatText = entry.bodyFatPercentage != null 
+                    ? 'Body Fat: ${entry.bodyFatPercentage!.toStringAsFixed(1)}%' 
+                    : 'No body fat data';
+                
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildProgressEntry(context, dateText, weightText, bodyFatText),
+                );
+              }).toList(),
             
             const SizedBox(height: 16),
             
@@ -111,13 +185,205 @@ class ProgressScreen extends ConsumerWidget {
             
             const SizedBox(height: 16),
             
-            _buildAchievementCard(context, '7-Day Streak', 'Logged progress for 7 consecutive days', Icons.local_fire_department, Colors.orange),
-            const SizedBox(height: 12),
-            _buildAchievementCard(context, 'Goal Reached', 'Lost 2kg this month', Icons.emoji_events, Colors.amber),
+            // Calculate achievements dynamically
+            ..._buildAchievements(context, progressState.entries),
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _buildAchievements(BuildContext context, List<dynamic> entries) {
+    final List<Widget> achievements = [];
+    
+    if (entries.isEmpty) {
+      achievements.add(
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.emoji_events_outlined,
+                  size: 48,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'No achievements yet',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Keep logging your progress to earn achievements!',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      return achievements;
+    }
+    
+    // Check for consecutive days streak
+    final streakDays = _calculateStreak(entries);
+    if (streakDays >= 7) {
+      achievements.add(_buildAchievementCard(
+        context,
+        '$streakDays-Day Streak',
+        'Logged progress for $streakDays consecutive days',
+        Icons.local_fire_department,
+        Colors.orange,
+      ));
+      achievements.add(const SizedBox(height: 12));
+    } else if (streakDays >= 3) {
+      achievements.add(_buildAchievementCard(
+        context,
+        '$streakDays-Day Streak',
+        'Keep it up! Aim for 7 days',
+        Icons.local_fire_department,
+        Colors.orange.withOpacity(0.6),
+      ));
+      achievements.add(const SizedBox(height: 12));
+    }
+    
+    // Check for weight loss/gain goal
+    if (entries.length >= 2) {
+      final weights = entries
+          .map((e) => e.weight)
+          .where((w) => w != null)
+          .cast<double>()
+          .toList();
+      
+      if (weights.length >= 2) {
+        final weightChange = weights.first - weights.last;
+        if (weightChange.abs() >= 2.0) {
+          final isLoss = weightChange < 0;
+          achievements.add(_buildAchievementCard(
+            context,
+            isLoss ? 'Weight Loss Goal' : 'Weight Gain Goal',
+            '${isLoss ? 'Lost' : 'Gained'} ${weightChange.abs().toStringAsFixed(1)}kg',
+            Icons.emoji_events,
+            Colors.amber,
+          ));
+          achievements.add(const SizedBox(height: 12));
+        }
+      }
+    }
+    
+    // Check for consistency (10+ entries)
+    if (entries.length >= 10) {
+      achievements.add(_buildAchievementCard(
+        context,
+        'Consistency Champion',
+        'Logged ${entries.length} progress entries',
+        Icons.star,
+        Colors.purple,
+      ));
+      achievements.add(const SizedBox(height: 12));
+    }
+    
+    // Check for body fat improvement
+    if (entries.length >= 2) {
+      final bodyFatValues = entries
+          .map((e) => e.bodyFatPercentage)
+          .where((bf) => bf != null)
+          .cast<double>()
+          .toList();
+      
+      if (bodyFatValues.length >= 2) {
+        final bodyFatChange = bodyFatValues.first - bodyFatValues.last;
+        if (bodyFatChange <= -2.0) {
+          achievements.add(_buildAchievementCard(
+            context,
+            'Body Transformation',
+            'Reduced body fat by ${bodyFatChange.abs().toStringAsFixed(1)}%',
+            Icons.fitness_center,
+            Colors.green,
+          ));
+          achievements.add(const SizedBox(height: 12));
+        }
+      }
+    }
+    
+    if (achievements.isEmpty) {
+      achievements.add(
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Text(
+              'Keep logging to unlock achievements!',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return achievements;
+  }
+  
+  int _calculateStreak(List<dynamic> entries) {
+    if (entries.isEmpty) return 0;
+    
+    // Sort entries by date (most recent first)
+    final sortedEntries = entries.toList()
+      ..sort((a, b) {
+        final dateA = DateTime.parse(a.entryDate);
+        final dateB = DateTime.parse(b.entryDate);
+        return dateB.compareTo(dateA);
+      });
+    
+    int streak = 0;
+    DateTime? lastDate;
+    
+    for (var entry in sortedEntries) {
+      final entryDate = DateTime.parse(entry.entryDate);
+      final normalizedEntryDate = DateTime(entryDate.year, entryDate.month, entryDate.day);
+      
+      if (lastDate == null) {
+        // First entry
+        final today = DateTime.now();
+        final normalizedToday = DateTime(today.year, today.month, today.day);
+        
+        // Check if the most recent entry is today or yesterday
+        final difference = normalizedToday.difference(normalizedEntryDate).inDays;
+        if (difference > 1) {
+          // Streak is broken
+          return 0;
+        }
+        streak = 1;
+        lastDate = normalizedEntryDate;
+      } else {
+        // Check if this entry is consecutive
+        final difference = lastDate.difference(normalizedEntryDate).inDays;
+        if (difference == 1) {
+          streak++;
+          lastDate = normalizedEntryDate;
+        } else {
+          // Streak broken
+          break;
+        }
+      }
+    }
+    
+    return streak;
+  }
+
+  static double? _calculateChange(List<double?> values) {
+    if (values.length < 2) return null;
+    final latest = values.first;
+    final previous = values[1];
+    if (latest == null || previous == null) return null;
+    return latest - previous;
   }
 
   Widget _buildSummaryCard(BuildContext context, String title, String value, String change, IconData icon, Color color) {

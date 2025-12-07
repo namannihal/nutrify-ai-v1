@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/nutrition_provider.dart';
 import '../../providers/fitness_provider.dart';
+import '../../providers/progress_provider.dart';
+import '../../models/progress.dart';
 import '../../widgets/common/loading_overlay.dart';
 import '../../widgets/dashboard/stats_card.dart';
 import '../../widgets/dashboard/quick_actions.dart';
@@ -25,16 +27,61 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(nutritionNotifierProvider.notifier).loadCurrentPlan();
       ref.read(fitnessNotifierProvider.notifier).loadCurrentPlan();
+      ref.read(progressNotifierProvider.notifier).loadProgressEntries();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(authNotifierProvider).user;
+    final authState = ref.watch(authNotifierProvider);
+    final user = authState.user;
+    final profile = authState.profile;
     final nutritionState = ref.watch(nutritionNotifierProvider);
     final fitnessState = ref.watch(fitnessNotifierProvider);
+    final progressState = ref.watch(progressNotifierProvider);
     
     final isLoading = nutritionState.isLoading || fitnessState.isLoading;
+
+    // Get calorie target from AI-generated nutrition plan
+    final calorieTarget = nutritionState.currentPlan?.dailyCalories ?? 
+                         (profile != null ? _calculateCalorieTarget(profile) : 2000);
+    
+    // Calculate current calories from today's meals in the AI-generated plan
+    final todayWeekday = DateTime.now().weekday;
+    final todaysMeals = nutritionState.currentPlan?.meals.where(
+      (meal) => _getDayNumber(meal.day) == todayWeekday,
+    ).toList() ?? [];
+    
+    final currentCalories = todaysMeals.fold<int>(0, (sum, dailyMeal) {
+      return sum + 
+             dailyMeal.breakfast.fold<int>(0, (s, m) => s + m.calories) +
+             dailyMeal.lunch.fold<int>(0, (s, m) => s + m.calories) +
+             dailyMeal.dinner.fold<int>(0, (s, m) => s + m.calories) +
+             dailyMeal.snacks.fold<int>(0, (s, m) => s + m.calories);
+    });
+    
+    final calorieProgress = calorieTarget > 0 ? currentCalories / calorieTarget : 0.0;
+    
+    // Get today's progress entry for water intake
+    final today = DateTime.now().toIso8601String().split('T')[0];
+    ProgressEntry? todayProgress;
+    
+    try {
+      todayProgress = progressState.entries.firstWhere(
+        (entry) => entry.entryDate.startsWith(today),
+      );
+    } catch (e) {
+      // No entry for today
+      todayProgress = null;
+    }
+    
+    // Calculate water intake (convert ml to glasses, ~250ml per glass)
+    final waterGlasses = (todayProgress?.waterIntakeMl ?? 0) ~/ 250;
+    final waterTarget = 8; // Standard recommendation
+    
+    // Calculate weekly workouts from fitness plan
+    final weeklyWorkoutTarget = fitnessState.currentPlan?.workouts.length ?? 4;
+    final completedWorkouts = 0; // TODO: Get from workout logs
 
     return Scaffold(
       body: LoadingOverlay(
@@ -62,7 +109,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Ready to crush your goals today?',
+                        profile != null && profile.goals != null && profile.goals!.isNotEmpty
+                            ? 'Working towards ${_formatGoal(profile.goals!.first)}'
+                            : 'Ready to crush your goals today?',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
@@ -90,9 +139,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       Expanded(
                         child: StatsCard(
                           title: 'Calories Today',
-                          value: '1,247',
-                          target: '/ 2,200',
-                          progress: 0.57,
+                          value: currentCalories.toString(),
+                          target: '/ ${calorieTarget.toStringAsFixed(0)}',
+                          progress: calorieProgress,
                           color: Theme.of(context).colorScheme.primary,
                           icon: Icons.local_fire_department,
                         ),
@@ -101,9 +150,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       Expanded(
                         child: StatsCard(
                           title: 'Water Intake',
-                          value: '6',
-                          target: '/ 8 glasses',
-                          progress: 0.75,
+                          value: waterGlasses.toString(),
+                          target: '/ $waterTarget glasses',
+                          progress: waterGlasses / waterTarget,
                           color: Theme.of(context).colorScheme.tertiary,
                           icon: Icons.water_drop,
                         ),
@@ -117,23 +166,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     children: [
                       Expanded(
                         child: StatsCard(
-                          title: 'Workouts',
-                          value: '3',
-                          target: '/ 4 this week',
-                          progress: 0.75,
+                          title: 'Current Weight',
+                          value: profile?.weight?.toStringAsFixed(1) ?? '--',
+                          target: profile != null ? 'kg' : '',
+                          progress: 0.0,
                           color: Theme.of(context).colorScheme.secondary,
-                          icon: Icons.fitness_center,
+                          icon: Icons.monitor_weight,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: StatsCard(
-                          title: 'Sleep',
-                          value: '7.2h',
-                          target: '/ 8h',
-                          progress: 0.9,
+                          title: 'Workouts',
+                          value: completedWorkouts.toString(),
+                          target: '/ $weeklyWorkoutTarget per week',
+                          progress: weeklyWorkoutTarget > 0 ? completedWorkouts / weeklyWorkoutTarget : 0.0,
                           color: Colors.indigo,
-                          icon: Icons.bedtime,
+                          icon: Icons.fitness_center,
                         ),
                       ),
                     ],
@@ -147,12 +196,43 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   const SizedBox(height: 24),
                   
                   // Today's Nutrition
-                  const RecentMealsCard(),
+                  RecentMealsCard(
+                    breakfastMeals: nutritionState.currentPlan?.meals
+                        .where((meal) => meal.day == DateTime.now().weekday.toString())
+                        .expand((meal) => meal.breakfast)
+                        .toList(),
+                    lunchMeals: nutritionState.currentPlan?.meals
+                        .where((meal) => meal.day == DateTime.now().weekday.toString())
+                        .expand((meal) => meal.lunch)
+                        .toList(),
+                    snackMeals: nutritionState.currentPlan?.meals
+                        .where((meal) => meal.day == DateTime.now().weekday.toString())
+                        .expand((meal) => meal.snacks)
+                        .toList(),
+                    dinnerMeals: nutritionState.currentPlan?.meals
+                        .where((meal) => meal.day == DateTime.now().weekday.toString())
+                        .expand((meal) => meal.dinner)
+                        .toList(),
+                    aiSuggestion: nutritionState.currentPlan != null
+                        ? 'You\'re on track! Keep up the great work.'
+                        : null,
+                    onViewAll: () => context.go('/nutrition'),
+                  ),
                   
                   const SizedBox(height: 16),
                   
                   // Workout Progress
-                  const WorkoutProgressCard(),
+                  WorkoutProgressCard(
+                    workouts: fitnessState.currentPlan?.workouts
+                        .expand((daily) => daily.workouts)
+                        .toList(),
+                    completedCount: completedWorkouts,
+                    onViewAll: () => context.go('/fitness'),
+                    onStartWorkout: (workout) {
+                      // TODO: Navigate to workout detail/start screen
+                      context.go('/fitness');
+                    },
+                  ),
                   
                   const SizedBox(height: 100), // Bottom padding for navigation
                 ]),
@@ -172,6 +252,74 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return 'afternoon';
     } else {
       return 'evening';
+    }
+  }
+
+  int _calculateCalorieTarget(profile) {
+    // Basic calorie calculation based on profile
+    // BMR calculation (Mifflin-St Jeor Equation)
+    if (profile.age == null || profile.weight == null || profile.height == null || profile.gender == null) {
+      return 2000; // Default
+    }
+
+    double bmr;
+    if (profile.gender?.toLowerCase() == 'male') {
+      bmr = (10 * profile.weight!) + (6.25 * profile.height!) - (5 * profile.age!) + 5;
+    } else {
+      bmr = (10 * profile.weight!) + (6.25 * profile.height!) - (5 * profile.age!) - 161;
+    }
+
+    // Activity multiplier
+    double activityMultiplier = 1.2; // sedentary default
+    switch (profile.activityLevel?.toLowerCase()) {
+      case 'sedentary':
+        activityMultiplier = 1.2;
+        break;
+      case 'lightly_active':
+        activityMultiplier = 1.375;
+        break;
+      case 'moderately_active':
+        activityMultiplier = 1.55;
+        break;
+      case 'very_active':
+        activityMultiplier = 1.725;
+        break;
+      case 'extremely_active':
+        activityMultiplier = 1.9;
+        break;
+    }
+
+    double tdee = bmr * activityMultiplier;
+
+    // Adjust for goal
+    switch (profile.primaryGoal?.toLowerCase()) {
+      case 'weight_loss':
+        return (tdee - 500).round(); // 500 cal deficit
+      case 'muscle_gain':
+        return (tdee + 300).round(); // 300 cal surplus
+      case 'maintenance':
+        return tdee.round();
+      default:
+        return tdee.round();
+    }
+  }
+
+  String _formatGoal(String? goal) {
+    if (goal == null) return 'your goals';
+    return goal.split('_').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
+  }
+  
+  int _getDayNumber(String day) {
+    final dayLower = day.toLowerCase();
+    switch (dayLower) {
+      case 'monday': return 1;
+      case 'tuesday': return 2;
+      case 'wednesday': return 3;
+      case 'thursday': return 4;
+      case 'friday': return 5;
+      case 'saturday': return 6;
+      case 'sunday': return 7;
+      default: return 1;
     }
   }
 }

@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/progress_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authNotifierProvider).user;
+    final authState = ref.watch(authNotifierProvider);
+    final user = authState.user;
+    final profile = authState.profile;
+    final progressState = ref.watch(progressNotifierProvider);
+    
+    // Calculate stats from progress entries
+    final daysActive = progressState.entries.length;
+    final streak = _calculateStreak(progressState.entries);
+    final goalsMetCount = 0; // TODO: Calculate from actual goals completion
     
     return Scaffold(
       appBar: AppBar(
@@ -68,15 +77,15 @@ class ProfileScreen extends ConsumerWidget {
             Row(
               children: [
                 Expanded(
-                  child: _buildStatCard(context, 'Days Active', '45', Icons.calendar_today),
+                  child: _buildStatCard(context, 'Days Active', daysActive.toString(), Icons.calendar_today),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(context, 'Goals Met', '12', Icons.emoji_events),
+                  child: _buildStatCard(context, 'Goals Met', goalsMetCount.toString(), Icons.emoji_events),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(context, 'Streak', '7', Icons.local_fire_department),
+                  child: _buildStatCard(context, 'Streak', streak.toString(), Icons.local_fire_department),
                 ),
               ],
             ),
@@ -89,6 +98,40 @@ class ProfileScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  static int _calculateStreak(List entries) {
+    if (entries.isEmpty) return 0;
+    
+    // Sort entries by date descending
+    final sortedEntries = List.from(entries)
+      ..sort((a, b) => b.entryDate.compareTo(a.entryDate));
+    
+    int streak = 0;
+    DateTime? lastDate;
+    
+    for (var entry in sortedEntries) {
+      final entryDate = DateTime.parse(entry.entryDate);
+      
+      if (lastDate == null) {
+        // First entry
+        final today = DateTime.now();
+        final daysDiff = today.difference(entryDate).inDays;
+        if (daysDiff > 1) break; // Not current
+        streak = 1;
+        lastDate = entryDate;
+      } else {
+        final daysDiff = lastDate.difference(entryDate).inDays;
+        if (daysDiff == 1) {
+          streak++;
+          lastDate = entryDate;
+        } else {
+          break; // Streak broken
+        }
+      }
+    }
+    
+    return streak;
   }
 
   Widget _buildStatCard(BuildContext context, String label, String value, IconData icon) {

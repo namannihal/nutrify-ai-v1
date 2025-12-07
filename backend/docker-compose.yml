@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: nutrify-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nutrify-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nutrify-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override Redis URL for container networking
+      REDIS_URL: redis://redis:6379/0
+      # Use Neon PostgreSQL from .env (already configured)
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app  # Mount for hot reload in development
+      - ./alembic:/app/alembic
+    networks:
+      - nutrify-network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  nutrify-network:
+    driver: bridge

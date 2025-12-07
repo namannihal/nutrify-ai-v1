@@ -13,6 +13,7 @@ from app.schemas.nutrition import (
     NutritionPlanCreate,
     MealLogCreate,
 )
+from app.ai.nutrition_agent import NutritionAgent
 
 router = APIRouter()
 
@@ -66,36 +67,38 @@ async def generate_nutrition_plan(
     db: AsyncSession = Depends(get_db)
 ):
     """Generate a new AI-powered nutrition plan"""
-    # TODO: Integrate with LangChain agent for AI generation
-    # For now, create a basic plan
+    # Initialize AI agent
+    agent = NutritionAgent(db)
     
-    # Calculate week start (current Monday)
-    today = datetime.now().date()
-    week_start = today - timedelta(days=today.weekday())
+    # Generate plan using AI
+    try:
+        plan = await agent.generate_weekly_plan(current_user)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate nutrition plan: {str(e)}"
+        )
     
-    # Create nutrition plan
-    plan = NutritionPlan(
-        user_id=current_user.id,
-        week_start=week_start,
-        week_end=week_start + timedelta(days=6),
-        daily_calories=2200,
-        protein_grams=165,
-        carbs_grams=220,
-        fat_grams=73,
-        created_by_ai=True,
-        adaptation_reason="Initial plan based on your profile and goals"
-    )
-    
-    db.add(plan)
-    await db.commit()
-    await db.refresh(plan)
-    
-    # Create sample meals
-    meals = _create_sample_meals(plan.id)
-    for meal in meals:
-        db.add(meal)
-    
-    await db.commit()
+    # Convert to response format
+    return {
+        "id": str(plan.id),
+        "user_id": str(plan.user_id),
+        "week_start": plan.week_start.isoformat(),
+        "daily_calories": plan.daily_calories,
+        "macros": plan.macros,
+        "meals": [
+            {
+                "day": meal.day,
+                "breakfast": [m.dict() for m in meal.breakfast],
+                "lunch": [m.dict() for m in meal.lunch],
+                "dinner": [m.dict() for m in meal.dinner],
+                "snacks": [m.dict() for m in meal.snacks],
+            }
+            for meal in plan.meals
+        ],
+        "created_by_ai": True,
+        "adaptation_reason": "AI-generated personalized meal plan",
+    }
     
     # Fetch created meals
     meals_result = await db.execute(

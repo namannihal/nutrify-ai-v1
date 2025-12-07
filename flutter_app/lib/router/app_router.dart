@@ -20,18 +20,28 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/login',
     redirect: (context, state) {
       final isLoggedIn = authState.user != null;
-      final isLoginPage = state.matchedLocation == '/login' || 
-                         state.matchedLocation == '/register' ||
-                         state.matchedLocation == '/onboarding';
+      final hasCompletedOnboarding = authState.hasCompletedOnboarding;
+      final currentLocation = state.matchedLocation;
+      
+      final isAuthPage = currentLocation == '/login' || currentLocation == '/register';
+      final isOnboardingPage = currentLocation == '/onboarding';
       
       // If not logged in and trying to access protected routes
-      if (!isLoggedIn && !isLoginPage) {
+      if (!isLoggedIn && !isAuthPage && !isOnboardingPage) {
         return '/login';
       }
       
-      // If logged in and on login/register page, redirect to dashboard
-      if (isLoggedIn && isLoginPage) {
-        return '/dashboard';
+      // If logged in
+      if (isLoggedIn) {
+        // User hasn't completed onboarding and not already on onboarding page
+        if (!hasCompletedOnboarding && !isOnboardingPage) {
+          return '/onboarding';
+        }
+        
+        // User has completed onboarding but still on auth/onboarding pages
+        if (hasCompletedOnboarding && (isAuthPage || isOnboardingPage)) {
+          return '/dashboard';
+        }
       }
       
       return null; // No redirect needed

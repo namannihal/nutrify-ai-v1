@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.fitness import Exercise, FitnessPlan, Workout
 from app.models.user import User
 from app.schemas.fitness import WorkoutLogCreate, WorkoutPlanResponse
+from app.ai.fitness_agent import FitnessAgent
 
 router = APIRouter()
 
@@ -100,56 +101,49 @@ async def generate_workout_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    today = datetime.now().date()
-    week_start = today - timedelta(days=today.weekday())
-
-    plan = FitnessPlan(
-        user_id=current_user.id,
-        week_start=week_start,
-        week_end=week_start + timedelta(days=6),
-        difficulty_level=7,
-        created_by_ai=True,
-        adaptation_reason="Initial plan based on your fitness profile",
-    )
-    db.add(plan)
-    await db.flush()
-
-    workouts = _create_sample_workouts(plan.id)
-    db.add_all(workouts)
-    await db.flush()
-
-    for workout in workouts:
-        exercises = _create_sample_exercises(workout.id, workout.workout_type)
-        db.add_all(exercises)
-
-    await db.commit()
-    await db.refresh(plan)
-
-    workouts_result = await db.execute(
-        select(Workout)
-        .where(Workout.plan_id == plan.id)
-        .order_by(Workout.day_of_week, Workout.created_at)
-    )
-    created_workouts = workouts_result.scalars().all()
-
-    workout_data: List[dict] = []
-    for workout in created_workouts:
-        exercises_result = await db.execute(
-            select(Exercise)
-            .where(Exercise.workout_id == workout.id)
-            .order_by(Exercise.exercise_order)
+    """Generate a new AI-powered workout plan"""
+    # Initialize AI agent
+    agent = FitnessAgent(db)
+    
+    # Generate plan using AI
+    try:
+        plan = await agent.generate_weekly_plan(current_user)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate workout plan: {str(e)}"
         )
-        exercises = exercises_result.scalars().all()
-        workout_data.append(_workout_to_dict(workout, exercises))
-
+    
+    # Get workouts from the generated plan
+    workout_data: List[dict] = []
+    for workout in plan.workouts:
+        workout_dict = {
+            "day": workout.day_of_week,
+            "type": workout.workout_type,
+            "duration": workout.duration_minutes,
+            "exercises": [
+                {
+                    "name": ex.name,
+                    "sets": ex.sets,
+                    "reps": ex.reps,
+                    "rest_time": ex.rest_seconds,
+                    "instructions": ex.instructions,
+                    "muscle_groups": ex.muscle_groups,
+                    "equipment": ex.equipment_needed,
+                }
+                for ex in workout.exercises
+            ],
+        }
+        workout_data.append(workout_dict)
+    
     return {
         "id": str(plan.id),
         "user_id": str(plan.user_id),
         "week_start": plan.week_start.isoformat(),
         "workouts": workout_data,
-        "difficulty_level": plan.difficulty_level or 0,
-        "created_by_ai": plan.created_by_ai,
-        "adaptation_reason": plan.adaptation_reason,
+        "difficulty_level": 0,
+        "created_by_ai": True,
+        "adaptation_reason": "AI-generated personalized workout plan",
     }
 
 

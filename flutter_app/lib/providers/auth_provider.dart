@@ -148,6 +148,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  Future<void> refreshUserData() async {
+    await _loadUserData();
+  }
+
   Future<bool> updateProfile(Map<String, dynamic> profileData) async {
     try {
       state = state.copyWith(isLoading: true, error: null);

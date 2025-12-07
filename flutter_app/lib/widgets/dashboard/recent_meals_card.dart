@@ -1,10 +1,32 @@
 import 'package:flutter/material.dart';
+import '../../models/nutrition.dart';
 
 class RecentMealsCard extends StatelessWidget {
-  const RecentMealsCard({super.key});
+  final List<Meal>? breakfastMeals;
+  final List<Meal>? lunchMeals;
+  final List<Meal>? snackMeals;
+  final List<Meal>? dinnerMeals;
+  final String? aiSuggestion;
+  final VoidCallback? onViewAll;
+
+  const RecentMealsCard({
+    super.key,
+    this.breakfastMeals,
+    this.lunchMeals,
+    this.snackMeals,
+    this.dinnerMeals,
+    this.aiSuggestion,
+    this.onViewAll,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Collect all logged meals
+    final hasMeals = (breakfastMeals?.isNotEmpty ?? false) ||
+        (lunchMeals?.isNotEmpty ?? false) ||
+        (snackMeals?.isNotEmpty ?? false) ||
+        (dinnerMeals?.isNotEmpty ?? false);
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -21,70 +43,142 @@ class RecentMealsCard extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () {
-                    // TODO: Navigate to full meal log
-                  },
+                  onPressed: onViewAll,
                   child: const Text('View All'),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            _buildMealItem(
-              context,
-              'Breakfast',
-              'Oatmeal with berries and nuts',
-              '485 kcal',
-              Icons.wb_sunny,
-              Colors.orange,
-            ),
-            const SizedBox(height: 12),
-            _buildMealItem(
-              context,
-              'Lunch',
-              'Grilled chicken salad with quinoa',
-              '620 kcal',
-              Icons.wb_cloudy,
-              Colors.blue,
-            ),
-            const SizedBox(height: 12),
-            _buildMealItem(
-              context,
-              'Snack',
-              'Greek yogurt with almonds',
-              '142 kcal',
-              Icons.coffee,
-              Colors.brown,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.lightbulb_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 20,
+            if (!hasMeals)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.restaurant_menu,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No meals logged today',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'You\'re on track! Add a protein-rich dinner to complete your day.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              )
+            else
+              ..._buildMealsList(context),
+            if (aiSuggestion != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.lightbulb_outlined,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        aiSuggestion!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _buildMealsList(BuildContext context) {
+    final List<Widget> mealWidgets = [];
+
+    // Add breakfast meals
+    if (breakfastMeals?.isNotEmpty ?? false) {
+      for (var meal in breakfastMeals!) {
+        if (mealWidgets.isNotEmpty) {
+          mealWidgets.add(const SizedBox(height: 12));
+        }
+        mealWidgets.add(_buildMealItem(
+          context,
+          'Breakfast',
+          meal.name,
+          '${meal.calories} kcal',
+          Icons.wb_sunny,
+          Colors.orange,
+        ));
+      }
+    }
+
+    // Add lunch meals
+    if (lunchMeals?.isNotEmpty ?? false) {
+      for (var meal in lunchMeals!) {
+        if (mealWidgets.isNotEmpty) {
+          mealWidgets.add(const SizedBox(height: 12));
+        }
+        mealWidgets.add(_buildMealItem(
+          context,
+          'Lunch',
+          meal.name,
+          '${meal.calories} kcal',
+          Icons.wb_cloudy,
+          Colors.blue,
+        ));
+      }
+    }
+
+    // Add snack meals
+    if (snackMeals?.isNotEmpty ?? false) {
+      for (var meal in snackMeals!) {
+        if (mealWidgets.isNotEmpty) {
+          mealWidgets.add(const SizedBox(height: 12));
+        }
+        mealWidgets.add(_buildMealItem(
+          context,
+          'Snack',
+          meal.name,
+          '${meal.calories} kcal',
+          Icons.coffee,
+          Colors.brown,
+        ));
+      }
+    }
+
+    // Add dinner meals
+    if (dinnerMeals?.isNotEmpty ?? false) {
+      for (var meal in dinnerMeals!) {
+        if (mealWidgets.isNotEmpty) {
+          mealWidgets.add(const SizedBox(height: 12));
+        }
+        mealWidgets.add(_buildMealItem(
+          context,
+          'Dinner',
+          meal.name,
+          '${meal.calories} kcal',
+          Icons.nightlight,
+          Colors.indigo,
+        ));
+      }
+    }
+
+    return mealWidgets;
   }
 
   Widget _buildMealItem(

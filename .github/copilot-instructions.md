@@ -1,3 +1,7 @@
+--- 
+applyTo: '/Users/namannihal/Desktop/nutrify-v2/**'
+---
+
 # Nutrify-AI Development Guide for AI Agents
 
 ## Product Overview
@@ -10,14 +14,16 @@ Nutrify-AI is an **agentic AI-powered fitness and nutrition platform** that repl
 ### Tech Stack
 - **Backend:** FastAPI + SQLAlchemy 2.0 (async) + Alembic migrations + PostgreSQL + Redis
 - **AI Layer:** LangChain agents (NutritionAgent, FitnessAgent, MotivationAgent) + LangSmith tracing + OpenAI GPT-4
-- **Frontend:** React + TypeScript + shadcn/ui + TailwindCSS + React Query (PWA-ready)
+- **Frontend (Web):** React + TypeScript + shadcn/ui + TailwindCSS + React Query (PWA-ready)
+- **Frontend (Mobile):** Flutter 3.10+ with Riverpod state management + GoRouter + Dio HTTP client
 - **Infrastructure:** Docker + Azure Container Apps + Terraform + Supabase (managed Postgres)
 
 ### Service Boundaries
 ```
-frontend/ (React PWA) → backend/app/ (FastAPI) → AI agents → PostgreSQL/Redis
-                              ↓
-                        LangSmith tracing
+flutter_app/ (Mobile) ──┐
+frontend/ (Web PWA) ────┼→ backend/app/ (FastAPI) → AI agents → PostgreSQL/Redis
+                        │                  ↓
+                        └────────────> LangSmith tracing
 ```
 
 ## Backend Structure (`backend/app/`)
@@ -30,6 +36,33 @@ frontend/ (React PWA) → backend/app/ (FastAPI) → AI agents → PostgreSQL/Re
 - `api/dependencies.py` — FastAPI dependencies (auth, DB sessions)
 
 **Pattern:** All imports are absolute from `app/` (e.g., `from app.models.user import User`). No relative imports.
+
+## Frontend Structure
+
+### Web (`frontend/src/`)
+- `pages/` — Routes (Landing, Onboarding, NutritionPlan, FitnessPlan, Progress, AIChat)
+- `components/` — shadcn/ui primitives + custom components
+- `contexts/` — React Context (AuthContext for JWT)
+- `services/` — API client functions (axios/fetch)
+- `hooks/` — Custom React hooks
+
+**Pattern:** Uses React Query for server state. Auth state stored in `AuthContext` + `localStorage`.
+
+### Mobile (`flutter_app/lib/`)
+- `screens/` — UI screens organized by feature (auth, home, nutrition, fitness, progress, ai, profile)
+- `providers/` — Riverpod state management (auth_provider, nutrition_provider, fitness_provider, progress_provider, ai_provider)
+- `services/` — API client (`api_service.dart` with singleton pattern)
+- `models/` — Data models with JSON serialization (`*.g.dart` generated via `build_runner`)
+- `router/` — GoRouter navigation with auth guards and redirect logic
+- `theme/` — Material 3 theme matching web brand colors (Blue-600 primary, Emerald-500 secondary)
+- `widgets/` — Reusable UI components
+
+**Patterns:**
+- **State:** Riverpod with `StateNotifier` for complex state (e.g., `AuthNotifier` in `auth_provider.dart`)
+- **Navigation:** GoRouter with redirect guards checking `isLoggedIn` && `hasCompletedOnboarding`
+- **API:** Singleton `ApiService` with JWT token management via `flutter_secure_storage`
+- **Models:** JSON serialization with `json_annotation` + `build_runner` (run `flutter pub run build_runner build`)
+- **API Base URL:** Uses `10.0.2.2:8000` for Android emulator (host machine's localhost)
 
 ## Developer Workflows
 
@@ -46,6 +79,42 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Note:** Always run from `backend/` directory. Uses `uv` for package management.
+
+### Running the Flutter App
+```bash
+cd flutter_app
+
+# Get dependencies
+flutter pub get
+
+# Generate JSON serialization code (after model changes)
+flutter pub run build_runner build --delete-conflicting-outputs
+
+# Run on emulator/device
+flutter run
+
+# Hot reload in terminal: press 'r'
+# Hot restart: press 'R'
+# Quit: press 'q'
+```
+
+**iOS Simulator:** Open via Xcode or `open -a Simulator`  
+**Android Emulator:** Launch via Android Studio or `emulator -avd <name>`  
+**Chrome (web):** `flutter run -d chrome` (for quick UI testing only)
+
+### Running the Web Frontend
+```bash
+cd frontend
+
+# Install dependencies
+pnpm install
+
+# Start dev server
+pnpm dev  # Runs on http://localhost:5173
+
+# Build for production
+pnpm build
+```
 
 ### Database Migrations
 ```bash
@@ -116,16 +185,6 @@ async def get_user(
 
 All use PostgreSQL `JSONB` for flexible fields (e.g., `macros`, `meal_breakdown`).
 
-## Frontend Structure (`frontend/src/`)
-
-- `pages/` — Routes (Landing, Onboarding, NutritionPlan, FitnessPlan, Progress, AIChat)
-- `components/` — shadcn/ui primitives + custom components
-- `contexts/` — React Context (AuthContext for JWT)
-- `services/` — API client functions (axios/fetch)
-- `hooks/` — Custom React hooks
-
-**Pattern:** Uses React Query for server state. Auth state stored in `AuthContext` + `localStorage`.
-
 ## Deployment
 
 ### Docker Build
@@ -186,3 +245,6 @@ Deploys to **Azure Container Apps** with managed Supabase PostgreSQL.
 - **Migrations:** Run `alembic upgrade head` after pulling new changes to sync schema
 - **Frontend env:** Vite requires `VITE_` prefix for env vars (e.g., `VITE_API_URL`)
 - **uv package manager:** Use `uv run` for CLI commands or activate venv first (`. .venv/bin/activate`)
+- **Flutter models:** After editing models with `@JsonSerializable`, run `flutter pub run build_runner build --delete-conflicting-outputs`
+- **Android emulator API:** Use `10.0.2.2:8000` instead of `localhost:8000` (configured in `api_service.dart`)
+- **Flutter hot reload:** Press `r` in terminal for hot reload, `R` for hot restart (faster than stopping/restarting)
