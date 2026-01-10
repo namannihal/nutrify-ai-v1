@@ -101,8 +101,8 @@ class MotivationAgent:
         from sqlalchemy import select
         stmt = select(ProgressEntry).where(
             ProgressEntry.user_id == user.id,
-            ProgressEntry.date >= week_ago
-        ).order_by(ProgressEntry.date.desc())
+            ProgressEntry.entry_date >= week_ago
+        ).order_by(ProgressEntry.entry_date.desc())
         result = await self.db.execute(stmt)
         progress_entries = result.scalars().all()
         
@@ -194,8 +194,7 @@ Keep insights concise, motivating, and data-driven."""
 
 USER PROFILE:
 - Goal: {profile.primary_goal if profile else 'general health'}
-- Current Weight: {progress_entries[0].current_weight if progress_entries and progress_entries[0].current_weight else 'N/A'} kg
-- Target Weight: {profile.target_weight if profile else 'N/A'} kg
+- Current Weight: {progress_entries[0].weight if progress_entries and progress_entries[0].weight else 'N/A'} kg
 
 WEEKLY PROGRESS DATA:
 """

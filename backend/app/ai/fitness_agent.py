@@ -185,18 +185,14 @@ Include rest days as needed based on intensity and user recovery ability."""
 
 USER PROFILE:
 - Age: {profile.age if profile else 'N/A'}
-- Fitness Level: {profile.fitness_level if profile else 'beginner'}
+- Fitness Level: {profile.fitness_experience if profile else 'beginner'}
 - Primary Goal: {profile.primary_goal if profile else 'general fitness'}
 - Activity Level: {profile.activity_level if profile else 'moderate'}
 
 """
         
-        if profile and profile.fitness_preferences:
-            prompt += f"FITNESS PREFERENCES: {', '.join(profile.fitness_preferences)}\n"
-        if profile and profile.available_equipment:
-            prompt += f"AVAILABLE EQUIPMENT: {', '.join(profile.available_equipment)}\n"
-        if profile and profile.injuries_limitations:
-            prompt += f"INJURIES/LIMITATIONS: {', '.join(profile.injuries_limitations)}\n"
+        if profile and profile.equipment_access:
+            prompt += f"AVAILABLE EQUIPMENT: {', '.join(profile.equipment_access)}\n"
             
         if context.get("past_workouts"):
             prompt += f"\nPAST WORKOUT PATTERNS: {context['past_workouts']}\n"

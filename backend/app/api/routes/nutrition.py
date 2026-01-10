@@ -73,38 +73,22 @@ async def generate_nutrition_plan(
     # Generate plan using AI
     try:
         plan = await agent.generate_weekly_plan(current_user)
+        await db.commit()
+        await db.refresh(plan)
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate nutrition plan: {str(e)}"
         )
     
-    # Convert to response format
-    return {
-        "id": str(plan.id),
-        "user_id": str(plan.user_id),
-        "week_start": plan.week_start.isoformat(),
-        "daily_calories": plan.daily_calories,
-        "macros": plan.macros,
-        "meals": [
-            {
-                "day": meal.day,
-                "breakfast": [m.dict() for m in meal.breakfast],
-                "lunch": [m.dict() for m in meal.lunch],
-                "dinner": [m.dict() for m in meal.dinner],
-                "snacks": [m.dict() for m in meal.snacks],
-            }
-            for meal in plan.meals
-        ],
-        "created_by_ai": True,
-        "adaptation_reason": "AI-generated personalized meal plan",
-    }
-    
-    # Fetch created meals
+    # Query meals from the database (don't rely on relationships)
     meals_result = await db.execute(
-        select(Meal).where(Meal.nutrition_plan_id == plan.id)
+        select(Meal)
+        .where(Meal.plan_id == plan.id)
+        .order_by(Meal.day_of_week, Meal.meal_order)
     )
-    created_meals = meals_result.scalars().all()
+    meals = meals_result.scalars().all()
     
     return {
         "id": str(plan.id),
@@ -116,7 +100,7 @@ async def generate_nutrition_plan(
             "carbs": plan.carbs_grams,
             "fat": plan.fat_grams,
         },
-        "meals": _organize_meals_by_day(created_meals),
+        "meals": _organize_meals_by_day(meals),
         "created_by_ai": plan.created_by_ai,
         "adaptation_reason": plan.adaptation_reason,
     }
@@ -158,12 +142,12 @@ def _meal_to_dict(meal: Meal) -> dict:
         "id": str(meal.id),
         "name": meal.name,
         "calories": meal.calories,
-        "protein": float(meal.protein_grams),
-        "carbs": float(meal.carbs_grams),
-        "fat": float(meal.fat_grams),
-        "ingredients": meal.ingredients or [],
+        "protein_grams": float(meal.protein_grams),
+        "carbs_grams": float(meal.carbs_grams),
+        "fat_grams": float(meal.fat_grams),
+        "ingredients": meal.ingredients or {},
         "instructions": meal.instructions,
-        "prep_time": meal.prep_time_minutes,
+        "prep_time_minutes": meal.prep_time_minutes,
     }
 
 

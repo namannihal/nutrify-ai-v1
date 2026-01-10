@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/nutrition_provider.dart';
+import '../../providers/fitness_provider.dart';
 import '../../widgets/common/loading_overlay.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -123,22 +125,122 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         'onboarding_completed': true, // Mark onboarding as complete
       };
 
-      // Use auth provider's updateProfile method
+      // Step 1: Update profile
       final success = await ref.read(authNotifierProvider.notifier).updateProfile(profileData);
       
       if (!success) {
         throw Exception('Failed to update profile');
       }
       
+      // Step 2: Auto-generate AI plans
       if (mounted) {
-        context.go('/dashboard');
+        // Show generating dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => WillPopScope(
+            onWillPop: () async => false,
+            child: Center(
+              child: Card(
+                margin: const EdgeInsets.all(32),
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Setting up your personalized plans...',
+                        style: Theme.of(context).textTheme.titleMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Generating AI meal and workout plans',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'This may take 10-15 seconds',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        // Generate both plans in parallel
+        final results = await Future.wait([
+          ref.read(nutritionNotifierProvider.notifier).generateNewPlan(),
+          ref.read(fitnessNotifierProvider.notifier).generateNewPlan(),
+        ]);
+
+        final nutritionSuccess = results[0];
+        final fitnessSuccess = results[1];
+
+        // Close loading dialog
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+
+        // Navigate to dashboard
+        if (mounted) {
+          context.go('/dashboard');
+          
+          // Show success message after navigation
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              final message = nutritionSuccess && fitnessSuccess
+                  ? '🎉 Your personalized plans are ready!'
+                  : nutritionSuccess
+                      ? '✓ Meal plan ready! Workout plan failed.'
+                      : fitnessSuccess
+                          ? '✓ Workout plan ready! Meal plan failed.'
+                          : '⚠️ Plans generation failed. Please try manually.';
+              
+              final color = nutritionSuccess && fitnessSuccess
+                  ? Colors.green
+                  : nutritionSuccess || fitnessSuccess
+                      ? Colors.orange
+                      : Colors.red;
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(message),
+                  backgroundColor: color,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
+          });
+        }
       }
     } catch (e) {
+      // Try to close any dialogs safely
+      try {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+      } catch (_) {
+        // Dialog might not be open, ignore
+      }
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to save profile: ${e.toString()}'),
+            content: Text('Failed to complete setup: ${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
+            duration: const Duration(seconds: 4),
           ),
         );
       }

@@ -116,26 +116,125 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(32.0),
                     child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
                           Icons.fitness_center,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.outline,
+                          size: 80,
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.3),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 24),
                         Text(
-                          'No workout plan yet',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          'No Workout Plan Found',
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Generate your personalized workout plan\npowered by AI',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
+                          textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 32),
+                        FilledButton.icon(
+                          onPressed: fitnessState.isLoading ? null : () async {
+                            // Show loading dialog
+                            showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              useRootNavigator: true,
+                              builder: (context) => const Center(
+                                child: Card(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(24.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        CircularProgressIndicator(),
+                                        SizedBox(height: 16),
+                                        Text('Generating your personalized workout plan...'),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+
+                            // Generate plan using AI
+                            bool success = false;
+                            try {
+                              success = await ref
+                                  .read(fitnessNotifierProvider.notifier)
+                                  .generateNewPlan();
+                            } finally {
+                              // Close loading dialog safely
+                              if (context.mounted) {
+                                Navigator.of(context, rootNavigator: true).pop();
+                              }
+                            }
+
+                            // Show result
+                            if (context.mounted) {
+                              if (success) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Row(
+                                      children: [
+                                        Icon(Icons.check_circle, color: Colors.white),
+                                        SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text('AI workout plan generated successfully!'),
+                                        ),
+                                      ],
+                                    ),
+                                    backgroundColor: Colors.green,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Row(
+                                      children: [
+                                        const Icon(Icons.error_outline, color: Colors.white),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            fitnessState.error ?? 'Failed to generate plan. Please try again.',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    backgroundColor: Colors.red,
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: const Duration(seconds: 4),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.auto_awesome),
+                          label: const Text('Generate AI Workout Plan'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 16,
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         Text(
-                          'Generate your personalized workout plan from the dashboard',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          'This will take 5-10 seconds',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.outline,
                           ),
-                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),

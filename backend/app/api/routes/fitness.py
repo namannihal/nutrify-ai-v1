@@ -108,42 +108,41 @@ async def generate_workout_plan(
     # Generate plan using AI
     try:
         plan = await agent.generate_weekly_plan(current_user)
+        await db.commit()
+        await db.refresh(plan)
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate workout plan: {str(e)}"
         )
     
-    # Get workouts from the generated plan
+    # Query workouts from the database (don't rely on relationships)
+    workouts_result = await db.execute(
+        select(Workout)
+        .where(Workout.plan_id == plan.id)
+        .order_by(Workout.day_of_week, Workout.created_at)
+    )
+    workouts = workouts_result.scalars().all()
+
     workout_data: List[dict] = []
-    for workout in plan.workouts:
-        workout_dict = {
-            "day": workout.day_of_week,
-            "type": workout.workout_type,
-            "duration": workout.duration_minutes,
-            "exercises": [
-                {
-                    "name": ex.name,
-                    "sets": ex.sets,
-                    "reps": ex.reps,
-                    "rest_time": ex.rest_seconds,
-                    "instructions": ex.instructions,
-                    "muscle_groups": ex.muscle_groups,
-                    "equipment": ex.equipment_needed,
-                }
-                for ex in workout.exercises
-            ],
-        }
-        workout_data.append(workout_dict)
+    for workout in workouts:
+        exercises_result = await db.execute(
+            select(Exercise)
+            .where(Exercise.workout_id == workout.id)
+            .order_by(Exercise.exercise_order)
+        )
+        exercises = exercises_result.scalars().all()
+        workout_data.append(_workout_to_dict(workout, exercises))
     
     return {
         "id": str(plan.id),
         "user_id": str(plan.user_id),
         "week_start": plan.week_start.isoformat(),
         "workouts": workout_data,
-        "difficulty_level": 0,
-        "created_by_ai": True,
-        "adaptation_reason": "AI-generated personalized workout plan",
+        "difficulty_level": plan.difficulty_level or 0,
+        "created_by_ai": plan.created_by_ai,
+        "adaptation_reason": plan.adaptation_reason,
     }
 
 

@@ -120,8 +120,8 @@ class NutritionAgent:
             
         # Base calculation using Mifflin-St Jeor
         age = profile.age or 25
-        weight = profile.weight or 70
-        height = profile.height or 170
+        weight = float(profile.weight) if profile.weight else 70.0
+        height = float(profile.height) if profile.height else 170.0
         gender = profile.gender or "male"
         activity = profile.activity_level or "moderate"
         goal = profile.primary_goal or "maintain"
@@ -248,12 +248,10 @@ USER PROFILE:
 """
         
         # Add dietary preferences/restrictions
-        if profile and profile.dietary_preferences:
-            prompt += f"DIETARY PREFERENCES: {', '.join(profile.dietary_preferences)}\n"
         if profile and profile.dietary_restrictions:
             prompt += f"DIETARY RESTRICTIONS: {', '.join(profile.dietary_restrictions)}\n"
-        if profile and profile.cuisine_preferences:
-            prompt += f"CUISINE PREFERENCES: {', '.join(profile.cuisine_preferences)}\n"
+        if profile and profile.allergies:
+            prompt += f"ALLERGIES: {profile.allergies}\n"
             
         # Add context from memory if available
         if context.get("past_preferences"):
@@ -272,6 +270,11 @@ USER PROFILE:
     ) -> List[Meal]:
         """Parse AI response into Meal objects"""
         import json
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"AI Response length: {len(response)} chars")
+        logger.info(f"AI Response preview: {response[:500]}...")
         
         # Extract JSON from response (handle markdown code blocks)
         if "```json" in response:
@@ -281,8 +284,11 @@ USER PROFILE:
             
         try:
             meals_data = json.loads(response.strip())
-        except json.JSONDecodeError:
+            logger.info(f"Successfully parsed {len(meals_data)} meals from AI response")
+        except json.JSONDecodeError as e:
             # Fallback: generate simple plan
+            logger.error(f"Failed to parse AI response as JSON: {e}")
+            logger.error(f"Response content: {response[:1000]}")
             return self._generate_fallback_meals(targets)
             
         meals = []

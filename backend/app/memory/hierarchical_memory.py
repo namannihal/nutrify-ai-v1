@@ -76,9 +76,9 @@ class HierarchicalMemory:
         stmt = select(ProgressEntry).where(
             and_(
                 ProgressEntry.user_id == user_id,
-                ProgressEntry.date >= two_hours_ago
+                ProgressEntry.entry_date >= two_hours_ago
             )
-        ).order_by(ProgressEntry.date.desc()).limit(5)
+        ).order_by(ProgressEntry.entry_date.desc()).limit(5)
         result = await self.db.execute(stmt)
         recent_entries = result.scalars().all()
         
@@ -155,22 +155,18 @@ class HierarchicalMemory:
                 "age": profile.age,
                 "gender": profile.gender,
                 "primary_goal": profile.primary_goal,
-                "fitness_level": profile.fitness_level
+                "fitness_experience": profile.fitness_experience
             },
             "preferences": {
-                "dietary": profile.dietary_preferences or [],
+                "dietary": profile.dietary_restrictions or [],
                 "restrictions": profile.dietary_restrictions or [],
-                "cuisines": profile.cuisine_preferences or [],
-                "workout_types": profile.fitness_preferences or []
+                "allergies": profile.allergies or ""
             },
             "constraints": {
-                "injuries": profile.injuries_limitations or [],
-                "available_equipment": profile.available_equipment or [],
-                "time_constraints": profile.time_availability or {}
+                "equipment": profile.equipment_access or []
             },
             "targets": {
                 "current_weight": profile.weight,
-                "target_weight": profile.target_weight,
                 "activity_level": profile.activity_level
             }
         }
@@ -230,9 +226,9 @@ class HierarchicalMemory:
         stmt = select(ProgressEntry).where(
             and_(
                 ProgressEntry.user_id == user_id,
-                ProgressEntry.date >= thirty_days_ago
+                ProgressEntry.entry_date >= thirty_days_ago
             )
-        ).order_by(ProgressEntry.date.desc())
+        ).order_by(ProgressEntry.entry_date.desc())
         result = await self.db.execute(stmt)
         entries = result.scalars().all()
         
@@ -268,8 +264,7 @@ class HierarchicalMemory:
         profile = user.profile
         return {
             "dietary_restrictions": profile.dietary_restrictions or [],
-            "injuries": profile.injuries_limitations or [],
-            "time_available": profile.time_availability or {}
+            "allergies": profile.allergies or ""
         }
         
     async def store_episode(
