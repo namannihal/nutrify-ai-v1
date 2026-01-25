@@ -50,11 +50,14 @@ class ProgressNotifier extends StateNotifier<ProgressState> {
     }
   }
 
-  Future<void> addProgressEntry(ProgressEntry entry) async {
+  Future<void> addProgressEntry(ProgressEntryCreate entry) async {
     try {
       final newEntry = await _apiService.createProgressEntry(entry);
+      // Insert new entry at the beginning and sort by date (newest first)
+      final updatedEntries = [newEntry, ...state.entries];
+      updatedEntries.sort((a, b) => b.entryDate.compareTo(a.entryDate));
       state = state.copyWith(
-        entries: [...state.entries, newEntry],
+        entries: updatedEntries,
       );
     } catch (e) {
       state = state.copyWith(error: e.toString());

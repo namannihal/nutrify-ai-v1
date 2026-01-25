@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/progress_provider.dart';
+import '../../providers/gamification_provider.dart';
+import '../../widgets/streak_card.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -12,10 +15,10 @@ class ProfileScreen extends ConsumerWidget {
     final user = authState.user;
     final profile = authState.profile;
     final progressState = ref.watch(progressNotifierProvider);
-    
+    final gamificationStats = ref.watch(gamificationStatsProvider);
+
     // Calculate stats from progress entries
     final daysActive = progressState.entries.length;
-    final streak = _calculateStreak(progressState.entries);
     final goalsMetCount = 0; // TODO: Calculate from actual goals completion
     
     return Scaffold(
@@ -85,53 +88,33 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(context, 'Streak', streak.toString(), Icons.local_fire_department),
+                  child: gamificationStats.when(
+                    data: (stats) => _buildStatCard(
+                      context,
+                      'Points',
+                      stats?.totalPoints.toString() ?? '0',
+                      Icons.star,
+                    ),
+                    loading: () => _buildStatCard(context, 'Points', '--', Icons.star),
+                    error: (_, __) => _buildStatCard(context, 'Points', '0', Icons.star),
+                  ),
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 24),
-            
+
+            // Streak Card
+            const StreakStatsCard(),
+
+            const SizedBox(height: 24),
+
             // Settings
             _buildSettingsSection(context, ref),
           ],
         ),
       ),
     );
-  }
-
-  static int _calculateStreak(List entries) {
-    if (entries.isEmpty) return 0;
-    
-    // Sort entries by date descending
-    final sortedEntries = List.from(entries)
-      ..sort((a, b) => b.entryDate.compareTo(a.entryDate));
-    
-    int streak = 0;
-    DateTime? lastDate;
-    
-    for (var entry in sortedEntries) {
-      final entryDate = DateTime.parse(entry.entryDate);
-      
-      if (lastDate == null) {
-        // First entry
-        final today = DateTime.now();
-        final daysDiff = today.difference(entryDate).inDays;
-        if (daysDiff > 1) break; // Not current
-        streak = 1;
-        lastDate = entryDate;
-      } else {
-        final daysDiff = lastDate.difference(entryDate).inDays;
-        if (daysDiff == 1) {
-          streak++;
-          lastDate = entryDate;
-        } else {
-          break; // Streak broken
-        }
-      }
-    }
-    
-    return streak;
   }
 
   Widget _buildStatCard(BuildContext context, String label, String value, IconData icon) {
@@ -180,6 +163,26 @@ class ProfileScreen extends ConsumerWidget {
         Card(
           child: Column(
             children: [
+              _buildSettingsTile(
+                context,
+                'Achievements',
+                'View your badges and progress',
+                Icons.emoji_events,
+                onTap: () {
+                  context.push('/achievements');
+                },
+              ),
+              const Divider(height: 1),
+              _buildSettingsTile(
+                context,
+                'Subscription',
+                'Manage your subscription plan',
+                Icons.card_membership,
+                onTap: () {
+                  context.push('/subscription');
+                },
+              ),
+              const Divider(height: 1),
               _buildSettingsTile(
                 context,
                 'Personal Information',

@@ -91,13 +91,14 @@ class HierarchicalMemory:
             "current_state": {
                 "timestamp": datetime.utcnow().isoformat(),
                 "active_goals": user.profile.primary_goal if user and user.profile else None,
-                "current_weight": recent_entries[0].current_weight if recent_entries and recent_entries[0].current_weight else None
+                "current_weight": float(recent_entries[0].weight) if recent_entries and recent_entries[0].weight else None
             },
             "recent_activity": [
                 {
-                    "date": entry.date.isoformat(),
-                    "calories": entry.calories_consumed,
-                    "workouts": entry.workouts_completed,
+                    "date": entry.entry_date.isoformat() if hasattr(entry.entry_date, 'isoformat') else str(entry.entry_date),
+                    "weight": float(entry.weight) if entry.weight else None,
+                    "mood_score": entry.mood_score,
+                    "energy_score": entry.energy_score,
                     "notes": entry.notes
                 }
                 for entry in recent_entries
@@ -175,48 +176,90 @@ class HierarchicalMemory:
         
     async def _get_nutrition_episodes(self, user_id: str) -> List[Dict]:
         """Retrieve nutrition-related behavioral episodes"""
-        # Get last 4 weeks of nutrition plans
+        from app.models.nutrition import Meal
+        from sqlalchemy import func
+
+        # Get last 4 weeks of nutrition plans with meal counts
         four_weeks_ago = datetime.utcnow() - timedelta(weeks=4)
-        stmt = select(NutritionPlan).where(
+
+        # Query plans and count meals separately to avoid lazy loading
+        stmt = select(
+            NutritionPlan.id,
+            NutritionPlan.week_start,
+            NutritionPlan.daily_calories,
+            NutritionPlan.protein_grams,
+            NutritionPlan.carbs_grams,
+            NutritionPlan.fat_grams,
+            func.count(Meal.id).label('meal_count')
+        ).outerjoin(
+            Meal, Meal.plan_id == NutritionPlan.id
+        ).where(
             and_(
                 NutritionPlan.user_id == user_id,
                 NutritionPlan.week_start >= four_weeks_ago
             )
+        ).group_by(
+            NutritionPlan.id,
+            NutritionPlan.week_start,
+            NutritionPlan.daily_calories,
+            NutritionPlan.protein_grams,
+            NutritionPlan.carbs_grams,
+            NutritionPlan.fat_grams
         ).order_by(NutritionPlan.week_start.desc()).limit(4)
+
         result = await self.db.execute(stmt)
-        plans = result.scalars().all()
-        
+        plans = result.all()
+
         episodes = []
         for plan in plans:
             episodes.append({
                 "week_start": plan.week_start.isoformat(),
                 "daily_calories": plan.daily_calories,
-                "macros": plan.macros,
-                "meal_count": len(plan.meals) if plan.meals else 0
+                "macros": {
+                    "protein": plan.protein_grams,
+                    "carbs": plan.carbs_grams,
+                    "fat": plan.fat_grams
+                },
+                "meal_count": plan.meal_count
             })
-            
+
         return episodes
         
     async def _get_fitness_episodes(self, user_id: str) -> List[Dict]:
         """Retrieve fitness-related behavioral episodes"""
-        # Get last 4 weeks of workout plans
+        from app.models.fitness import Workout
+        from sqlalchemy import func
+
+        # Get last 4 weeks of workout plans with workout counts
         four_weeks_ago = datetime.utcnow() - timedelta(weeks=4)
-        stmt = select(FitnessPlan).where(
+
+        # Query plans and count workouts separately to avoid lazy loading
+        stmt = select(
+            FitnessPlan.id,
+            FitnessPlan.week_start,
+            func.count(Workout.id).label('workout_count')
+        ).outerjoin(
+            Workout, Workout.plan_id == FitnessPlan.id
+        ).where(
             and_(
                 FitnessPlan.user_id == user_id,
                 FitnessPlan.week_start >= four_weeks_ago
             )
+        ).group_by(
+            FitnessPlan.id,
+            FitnessPlan.week_start
         ).order_by(FitnessPlan.week_start.desc()).limit(4)
+
         result = await self.db.execute(stmt)
-        plans = result.scalars().all()
-        
+        plans = result.all()
+
         episodes = []
         for plan in plans:
             episodes.append({
                 "week_start": plan.week_start.isoformat(),
-                "workout_count": len(plan.workouts) if plan.workouts else 0
+                "workout_count": plan.workout_count
             })
-            
+
         return episodes
         
     async def _get_progress_patterns(self, user_id: str) -> Dict:
@@ -234,12 +277,13 @@ class HierarchicalMemory:
         
         if not entries:
             return {}
-            
+
         # Calculate patterns
-        total_workouts = sum(e.workouts_completed or 0 for e in entries)
-        avg_calories = sum(e.calories_consumed or 0 for e in entries) / len(entries) if entries else 0
-        
-        weights = [e.current_weight for e in entries if e.current_weight]
+        # Note: workouts_completed and calories_consumed are not direct fields on ProgressEntry
+        # They may be stored in measurements JSONB if needed
+        total_entries_with_measurements = sum(1 for e in entries if e.measurements)
+
+        weights = [float(e.weight) for e in entries if e.weight]
         weight_trend = "stable"
         if len(weights) >= 2:
             if weights[0] < weights[-1]:
@@ -247,13 +291,19 @@ class HierarchicalMemory:
             elif weights[0] > weights[-1]:
                 weight_trend = "increasing"
                 
+        # Calculate average mood and energy scores
+        mood_scores = [e.mood_score for e in entries if e.mood_score]
+        energy_scores = [e.energy_score for e in entries if e.energy_score]
+        avg_mood = sum(mood_scores) / len(mood_scores) if mood_scores else None
+        avg_energy = sum(energy_scores) / len(energy_scores) if energy_scores else None
+
         return {
             "total_entries": len(entries),
-            "total_workouts": total_workouts,
-            "avg_workouts_per_week": (total_workouts / 4.3) if entries else 0,
-            "avg_calories": int(avg_calories),
+            "entries_with_measurements": total_entries_with_measurements,
+            "avg_mood": round(avg_mood, 1) if avg_mood else None,
+            "avg_energy": round(avg_energy, 1) if avg_energy else None,
             "weight_trend": weight_trend,
-            "consistency_score": (len(entries) / 30) * 100  # Percentage of days logged
+            "consistency_score": round((len(entries) / 30) * 100, 1)  # Percentage of days logged
         }
         
     def _get_immediate_constraints(self, user: Optional[User]) -> Dict:

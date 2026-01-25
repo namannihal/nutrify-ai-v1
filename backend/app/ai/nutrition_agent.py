@@ -82,11 +82,12 @@ class NutritionAgent:
         for meal in meals:
             meal.plan_id = nutrition_plan.id
             self.db.add(meal)
-        
-        await self.db.commit()
-        await self.db.refresh(nutrition_plan)
-        
-        # Step 5: Update episodic memory with this plan
+
+        # Note: Commit is handled by the route handler
+        # Just flush to ensure we have IDs for relationships
+        await self.db.flush()
+
+        # Step 5: Update episodic memory with this plan (will be committed by route handler)
         await self.memory.store_episode(
             user_id=user.id,
             episode_type="nutrition_plan_generated",
@@ -97,7 +98,7 @@ class NutritionAgent:
                 "generated_at": datetime.utcnow().isoformat()
             }
         )
-        
+
         return nutrition_plan
         
     async def _calculate_nutrition_targets(
@@ -177,11 +178,18 @@ class NutritionAgent:
         user_prompt = self._build_nutrition_user_prompt(user, targets, context)
         
         # Call LLM for meal generation
-        response = await self.llm.ainvoke([
+        # Use gpt-4o-mini for faster responses (10-15 sec vs 20-25 sec)
+        fast_llm = ChatOpenAI(
+            model="gpt-4o-mini",  # Faster and cheaper than gpt-4-turbo-preview
+            temperature=0.7,
+            api_key=settings.OPENAI_API_KEY
+        )
+
+        response = await fast_llm.ainvoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ])
-        
+
         # Parse AI response into structured meal data
         meals = await self._parse_meal_response(response.content, targets)
         
@@ -189,38 +197,68 @@ class NutritionAgent:
         
     def _build_nutrition_system_prompt(self) -> str:
         """System prompt for nutrition agent"""
-        return """You are an expert nutritionist and meal planner AI.
-Your role is to create personalized, balanced, and enjoyable weekly meal plans.
+        import random
+
+        # Randomize cuisine focus for variety
+        cuisine_themes = [
+            "Mediterranean and Middle Eastern cuisines",
+            "Asian-inspired meals (Japanese, Korean, Thai, Vietnamese)",
+            "Latin American and Mexican cuisines",
+            "Indian and South Asian flavors",
+            "Modern American with international fusion",
+            "European comfort foods (Italian, French, Greek)",
+        ]
+        cuisine_focus = random.choice(cuisine_themes)
+
+        # Randomize protein variety
+        protein_focuses = [
+            "emphasizing fish and seafood twice this week",
+            "featuring lean poultry and eggs",
+            "incorporating plant-based proteins like tofu, tempeh, and legumes",
+            "balancing red meat, poultry, and fish throughout the week",
+        ]
+        protein_focus = random.choice(protein_focuses)
+
+        return f"""You are an expert nutritionist and meal planner AI.
+Your role is to create personalized, balanced, and UNIQUE weekly meal plans.
+
+VARIETY IS CRITICAL - This week's theme: {cuisine_focus}, {protein_focus}.
 
 Key principles:
 - Prioritize whole foods and balanced macronutrients
 - Consider user preferences, dietary restrictions, and cultural foods
-- Ensure variety across the week (different proteins, vegetables, grains)
+- MAXIMUM VARIETY: Never repeat the same main protein or dish across the week
+- Different breakfast styles each day (smoothies, eggs, oatmeal, yogurt bowls, etc.)
+- Different lunch formats (salads, wraps, bowls, soups, sandwiches)
+- Different dinner cuisines and cooking methods each day
 - Make meals practical based on cooking skills and time constraints
 - Include specific portion sizes and preparation methods
 - Provide accurate calorie and macro breakdowns per meal
 
-Response format: Return a JSON array with 28 meals (4 meals per day x 7 days). Each meal:
-{
-  "day": 0,  // 0=Monday to 6=Sunday
-  "meal_type": "breakfast",  // breakfast, lunch, dinner, snack
-  "meal_order": 1,  // Order within same meal_type (e.g., snack 1, snack 2)
-  "name": "Oatmeal with Berries",
-  "description": "Steel-cut oats topped with mixed berries and almonds",
-  "calories": 350,
-  "protein_grams": 12.5,
-  "carbs_grams": 55.0,
-  "fat_grams": 8.0,
-  "fiber_grams": 8.0,
-  "ingredients": {"oats": "1 cup", "berries": "1/2 cup", "almonds": "1 oz"},
-  "instructions": "Cook oats, top with berries...",
-  "prep_time_minutes": 5,
-  "cook_time_minutes": 10,
-  "cuisine_type": "American",
-  "dietary_tags": ["vegetarian"]
-}
+CRITICAL: You MUST respond with ONLY a valid JSON array, nothing else. No explanations, no code blocks, no markdown.
 
-Ensure daily totals approximately match target calories and macros."""
+Return exactly 28 meals (4 per day x 7 days) as a JSON array. Each meal object must have these fields:
+{{
+  "day": 0,
+  "meal_type": "breakfast",
+  "meal_order": 1,
+  "name": "Shakshuka with Crusty Bread",
+  "description": "Poached eggs in spiced tomato sauce with feta and fresh herbs",
+  "calories": 380,
+  "protein_grams": 18.5,
+  "carbs_grams": 32.0,
+  "fat_grams": 20.0,
+  "fiber_grams": 5.0,
+  "ingredients": {{"eggs": "2 large", "tomato_sauce": "1 cup", "feta": "1 oz", "bread": "1 slice"}},
+  "instructions": "Simmer tomato sauce with spices, crack eggs into sauce, cover and cook until set",
+  "prep_time_minutes": 5,
+  "cook_time_minutes": 15,
+  "cuisine_type": "Middle Eastern",
+  "dietary_tags": ["vegetarian"]
+}}
+
+Ensure daily totals match target calories and macros. Be CREATIVE and DIVERSE with meal choices!
+RESPOND WITH ONLY THE JSON ARRAY."""
         
     def _build_nutrition_user_prompt(
         self,
@@ -229,9 +267,20 @@ Ensure daily totals approximately match target calories and macros."""
         context: Dict
     ) -> str:
         """Build user-specific prompt with context"""
+        import random
+        from datetime import datetime
+
         profile = user.profile
-        
-        prompt = f"""Generate a 7-day meal plan for this user:
+
+        # Add variety hints
+        breakfast_styles = ["smoothie bowl", "egg-based", "overnight oats", "savory breakfast", "pancakes/waffles", "yogurt parfait", "breakfast burrito"]
+        random.shuffle(breakfast_styles)
+        breakfast_hint = ", ".join(breakfast_styles[:3])
+
+        # Generate a unique seed based on time for truly different plans
+        unique_seed = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        prompt = f"""Generate a UNIQUE 7-day meal plan (seed: {unique_seed}) for this user:
 
 NUTRITIONAL TARGETS (daily):
 - Calories: {targets['daily_calories']} kcal
@@ -245,22 +294,27 @@ USER PROFILE:
 - Primary Goal: {profile.primary_goal if profile else 'general health'}
 - Activity Level: {profile.activity_level if profile else 'moderate'}
 
+VARIETY REQUIREMENTS:
+- Include at least 3 different breakfast styles from: {breakfast_hint}
+- Each dinner should feature a different main protein
+- Mix cooking methods: grilling, baking, sautéing, steaming, raw
+
 """
-        
+
         # Add dietary preferences/restrictions
         if profile and profile.dietary_restrictions:
             prompt += f"DIETARY RESTRICTIONS: {', '.join(profile.dietary_restrictions)}\n"
         if profile and profile.allergies:
             prompt += f"ALLERGIES: {profile.allergies}\n"
-            
+
         # Add context from memory if available
         if context.get("past_preferences"):
             prompt += f"\nPAST PREFERENCES: {context['past_preferences']}\n"
         if context.get("successful_patterns"):
             prompt += f"\nSUCCESSFUL PATTERNS: {context['successful_patterns']}\n"
-            
-        prompt += "\nGenerate the 7-day meal plan as JSON:"
-        
+
+        prompt += "\nGenerate a creative and diverse 7-day meal plan as JSON:"
+
         return prompt
         
     async def _parse_meal_response(
@@ -271,24 +325,53 @@ USER PROFILE:
         """Parse AI response into Meal objects"""
         import json
         import logging
-        
+
         logger = logging.getLogger(__name__)
         logger.info(f"AI Response length: {len(response)} chars")
-        logger.info(f"AI Response preview: {response[:500]}...")
-        
-        # Extract JSON from response (handle markdown code blocks)
-        if "```json" in response:
-            response = response.split("```json")[1].split("```")[0]
-        elif "```" in response:
-            response = response.split("```")[1].split("```")[0]
-            
+        logger.debug(f"Full AI Response: {response}")
+
+        json_str = response.strip()
+
+        # Method 1: Extract from markdown code blocks using index-based approach
+        if "```json" in json_str:
+            start_marker = "```json"
+            start_idx = json_str.find(start_marker) + len(start_marker)
+            end_idx = json_str.find("```", start_idx)
+            if end_idx > start_idx:
+                json_str = json_str[start_idx:end_idx].strip()
+                logger.info("Extracted JSON from ```json``` block")
+        elif "```" in json_str:
+            start_idx = json_str.find("```") + 3
+            end_idx = json_str.find("```", start_idx)
+            if end_idx > start_idx:
+                json_str = json_str[start_idx:end_idx].strip()
+                logger.info("Extracted JSON from ``` block")
+
+        # Method 2: Find the JSON array by locating balanced brackets
+        if not json_str.startswith('['):
+            start_idx = json_str.find('[')
+            if start_idx != -1:
+                # Find the matching closing bracket
+                bracket_count = 0
+                end_idx = start_idx
+                for i, char in enumerate(json_str[start_idx:], start=start_idx):
+                    if char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i + 1
+                            break
+                json_str = json_str[start_idx:end_idx]
+                logger.info("Extracted JSON array using bracket matching")
+
         try:
-            meals_data = json.loads(response.strip())
+            meals_data = json.loads(json_str)
             logger.info(f"Successfully parsed {len(meals_data)} meals from AI response")
         except json.JSONDecodeError as e:
-            # Fallback: generate simple plan
             logger.error(f"Failed to parse AI response as JSON: {e}")
-            logger.error(f"Response content: {response[:1000]}")
+            logger.error(f"Attempted to parse (first 500 chars): {json_str[:500]}")
+            logger.error(f"Original response (first 500 chars): {response[:500]}")
             return self._generate_fallback_meals(targets)
             
         meals = []

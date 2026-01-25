@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,8 @@ import '../models/nutrition.dart';
 import '../models/fitness.dart';
 import '../models/progress.dart';
 import '../models/ai.dart';
+import '../models/workout_session.dart';
+import '../models/gamification.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -21,8 +24,10 @@ class ApiException implements Exception {
 }
 
 class ApiService {
-  // Use 10.0.2.2 for Android emulator to access host machine's localhost
-  static const String _baseUrl = 'http://10.0.2.2:8000/api/v1';
+  // Use your computer's local IP for both emulator and physical device
+  // Run: ipconfig getifaddr en0 (Mac) or ipconfig (Windows) to get your IP
+  // This works for both emulator and physical device on the same network
+  static const String _baseUrl = 'http://192.168.1.17:8000/api/v1';
   static const String _storageKeyToken = 'auth_token';
   static const String _storageKeyRefreshToken = 'refresh_token';
   
@@ -84,34 +89,36 @@ class ApiService {
     Map<String, dynamic>? body,
     bool requiresAuth = true,
     T Function(dynamic)? fromJson,
+    Duration? timeout,
   }) async {
     try {
       final url = Uri.parse('$_baseUrl$endpoint');
       final headers = requiresAuth ? await _authHeaders : _headers;
+      final requestTimeout = timeout ?? const Duration(seconds: 60);
 
       _logger.d('$method $endpoint');
 
       http.Response response;
       switch (method.toLowerCase()) {
         case 'get':
-          response = await _client.get(url, headers: headers);
+          response = await _client.get(url, headers: headers).timeout(requestTimeout);
           break;
         case 'post':
           response = await _client.post(
             url,
             headers: headers,
             body: body != null ? json.encode(body) : null,
-          );
+          ).timeout(requestTimeout);
           break;
         case 'put':
           response = await _client.put(
             url,
             headers: headers,
             body: body != null ? json.encode(body) : null,
-          );
+          ).timeout(requestTimeout);
           break;
         case 'delete':
-          response = await _client.delete(url, headers: headers);
+          response = await _client.delete(url, headers: headers).timeout(requestTimeout);
           break;
         default:
           throw ArgumentError('Unsupported method: $method');
@@ -119,18 +126,69 @@ class ApiService {
 
       _logger.d('Response ${response.statusCode}: ${response.body}');
 
-      if (response.statusCode == 401) {
-        // Token expired, try to refresh
+      if (response.statusCode == 401 && requiresAuth) {
+        // Token expired, try to refresh and retry request once
+        _logger.d('Token expired, attempting refresh');
         await _refreshToken();
-        throw ApiException('Please log in again', 401);
+
+        // Retry the request with new token
+        final newHeaders = await _authHeaders;
+        http.Response retryResponse;
+        switch (method.toLowerCase()) {
+          case 'get':
+            retryResponse = await _client.get(url, headers: newHeaders).timeout(requestTimeout);
+            break;
+          case 'post':
+            retryResponse = await _client.post(
+              url,
+              headers: newHeaders,
+              body: body != null ? json.encode(body) : null,
+            ).timeout(requestTimeout);
+            break;
+          case 'put':
+            retryResponse = await _client.put(
+              url,
+              headers: newHeaders,
+              body: body != null ? json.encode(body) : null,
+            ).timeout(requestTimeout);
+            break;
+          case 'delete':
+            retryResponse = await _client.delete(url, headers: newHeaders).timeout(requestTimeout);
+            break;
+          default:
+            throw ArgumentError('Unsupported method: $method');
+        }
+
+        if (retryResponse.statusCode >= 400) {
+          final errorData = json.decode(retryResponse.body);
+          throw ApiException(
+            errorData['detail'] ?? 'Request failed after refresh',
+            retryResponse.statusCode,
+          );
+        }
+
+        response = retryResponse;
       }
 
       if (response.statusCode >= 400) {
         final errorData = json.decode(response.body);
-        throw ApiException(
-          errorData['detail'] ?? 'Request failed',
-          response.statusCode,
-        );
+        // Handle both string and list detail formats (FastAPI validation errors return a list)
+        String errorMessage;
+        final detail = errorData['detail'];
+        if (detail is String) {
+          errorMessage = detail;
+        } else if (detail is List && detail.isNotEmpty) {
+          // Extract first validation error message
+          final firstError = detail.first;
+          if (firstError is Map) {
+            errorMessage = firstError['msg'] ?? 'Validation error';
+          } else {
+            errorMessage = detail.map((e) => e.toString()).join(', ');
+          }
+        } else {
+          errorMessage = 'Request failed';
+        }
+        throw ApiException(errorMessage, response.statusCode);
       }
 
       if (response.body.isEmpty) {
@@ -148,6 +206,8 @@ class ApiService {
       throw ApiException('Network connection failed');
     } on FormatException {
       throw ApiException('Invalid response format');
+    } on TimeoutException {
+      throw ApiException('Request timed out. Please try again.');
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Request failed: $e');
@@ -155,14 +215,41 @@ class ApiService {
   }
 
   Future<void> _refreshToken() async {
-    final refreshToken = await _storage.read(key: _storageKeyRefreshToken);
-    if (refreshToken == null) {
-      throw ApiException('No refresh token available');
-    }
+    try {
+      final refreshToken = await _storage.read(key: _storageKeyRefreshToken);
+      if (refreshToken == null) {
+        throw ApiException('No refresh token available');
+      }
 
-    // TODO: Implement refresh token logic based on your backend
-    // For now, just clear tokens to force re-login
-    await logout();
+      _logger.d('Attempting to refresh token');
+
+      final url = Uri.parse('$_baseUrl/auth/refresh');
+      final response = await _client.post(
+        url,
+        headers: _headers,
+        body: json.encode({'refresh_token': refreshToken}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final newToken = data['access_token'];
+        final newRefreshToken = data['refresh_token'];
+
+        await _setToken(newToken);
+        await _setRefreshToken(newRefreshToken);
+
+        _logger.d('Token refreshed successfully');
+      } else {
+        _logger.e('Token refresh failed: ${response.statusCode}');
+        // Clear tokens and force re-login
+        await logout();
+        throw ApiException('Token refresh failed, please log in again');
+      }
+    } catch (e) {
+      _logger.e('Error refreshing token: $e');
+      await logout();
+      throw ApiException('Token refresh failed, please log in again');
+    }
   }
 
   // Authentication methods
@@ -219,8 +306,21 @@ class ApiService {
   }
 
   Future<void> logout() async {
-    await _setToken(null);
-    await _setRefreshToken(null);
+    try {
+      // Call backend logout endpoint
+      await _makeRequest<void>(
+        'POST',
+        '/auth/logout',
+        requiresAuth: true,
+      );
+    } catch (e) {
+      _logger.e('Logout API call failed: $e');
+      // Continue with local logout even if API call fails
+    } finally {
+      // Clear local tokens
+      await _setToken(null);
+      await _setRefreshToken(null);
+    }
   }
 
   Future<bool> get isLoggedIn async {
@@ -267,24 +367,49 @@ class ApiService {
     final response = await _makeRequest<Map<String, dynamic>>(
       'POST',
       '/nutrition/generate',
+      // AI generation can take 3-5 minutes
+      timeout: const Duration(minutes: 6),
     );
     return NutritionPlan.fromJson(response);
   }
 
-  Future<void> logMeal({
+  Future<Map<String, dynamic>> logMeal({
+    required String mealDate,
     required String mealType,
-    required List<Map<String, dynamic>> foods,
-    required String date,
+    String? mealId,
+    String? customMealName,
+    int? calories,
+    double? proteinGrams,
+    double? carbsGrams,
+    double? fatGrams,
+    int? satisfactionRating,
+    Map<String, dynamic>? customFoods,
   }) async {
-    await _makeRequest(
+    final response = await _makeRequest<Map<String, dynamic>>(
       'POST',
       '/nutrition/log-meal',
       body: {
+        'meal_date': mealDate,
         'meal_type': mealType,
-        'foods': foods,
-        'date': date,
+        if (mealId != null) 'meal_id': mealId,
+        if (customMealName != null) 'custom_meal_name': customMealName,
+        if (calories != null) 'calories': calories,
+        if (proteinGrams != null) 'protein_grams': proteinGrams,
+        if (carbsGrams != null) 'carbs_grams': carbsGrams,
+        if (fatGrams != null) 'fat_grams': fatGrams,
+        if (satisfactionRating != null) 'satisfaction_rating': satisfactionRating,
+        if (customFoods != null) 'custom_foods': customFoods,
       },
     );
+    return response;
+  }
+
+  Future<List<Map<String, dynamic>>> getMealLogs({int days = 7}) async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/nutrition/meal-logs?days=$days',
+    );
+    return response.cast<Map<String, dynamic>>();
   }
 
   // Fitness methods
@@ -300,26 +425,49 @@ class ApiService {
     final response = await _makeRequest<Map<String, dynamic>>(
       'POST',
       '/fitness/generate',
+      // AI generation can take 3-5 minutes
+      timeout: const Duration(minutes: 6),
     );
     return WorkoutPlan.fromJson(response);
   }
 
-  Future<void> logWorkout({
-    required String workoutId,
-    required List<Map<String, dynamic>> exercisesCompleted,
-    required int duration,
-    required String date,
+  Future<Map<String, dynamic>> logWorkout({
+    required String workoutDate,
+    required int durationMinutes,
+    String? workoutId,
+    String? workoutName,
+    int? caloriesBurned,
+    int? perceivedExertion,
+    int? moodAfter,
+    bool completed = true,
+    int? completionPercentage,
+    String? notes,
   }) async {
-    await _makeRequest(
+    final response = await _makeRequest<Map<String, dynamic>>(
       'POST',
       '/fitness/log-workout',
       body: {
-        'workout_id': workoutId,
-        'exercises_completed': exercisesCompleted,
-        'duration': duration,
-        'date': date,
+        'workout_date': workoutDate,
+        'duration_minutes': durationMinutes,
+        if (workoutId != null) 'workout_id': workoutId,
+        if (workoutName != null) 'workout_name': workoutName,
+        if (caloriesBurned != null) 'calories_burned': caloriesBurned,
+        if (perceivedExertion != null) 'perceived_exertion': perceivedExertion,
+        if (moodAfter != null) 'mood_after': moodAfter,
+        'completed': completed,
+        if (completionPercentage != null) 'completion_percentage': completionPercentage,
+        if (notes != null) 'notes': notes,
       },
     );
+    return response;
+  }
+
+  Future<List<Map<String, dynamic>>> getWorkoutLogs({int days = 7}) async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/fitness/workout-logs?days=$days',
+    );
+    return response.cast<Map<String, dynamic>>();
   }
 
   // Progress methods
@@ -348,7 +496,7 @@ class ApiService {
     return response.map((json) => ProgressEntry.fromJson(json)).toList();
   }
 
-  Future<ProgressEntry> createProgressEntry(ProgressEntry progressData) async {
+  Future<ProgressEntry> createProgressEntry(ProgressEntryCreate progressData) async {
     final response = await _makeRequest<Map<String, dynamic>>(
       'POST',
       '/progress',
@@ -398,6 +546,452 @@ class ApiService {
     );
     return ChatResponse.fromJson(response);
   }
+
+  // Subscription methods
+  Future<Map<String, dynamic>?> getCurrentSubscription() async {
+    try {
+      final response = await _makeRequest<Map<String, dynamic>>(
+        'GET',
+        '/subscriptions/current',
+      );
+      return response;
+    } catch (e) {
+      _logger.e('Failed to get subscription: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> createCheckoutSession({
+    required String tier,
+    required String billingPeriod,
+    required String successUrl,
+    required String cancelUrl,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/subscriptions/checkout',
+      body: {
+        'tier': tier,
+        'billing_period': billingPeriod,
+        'success_url': successUrl,
+        'cancel_url': cancelUrl,
+      },
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> createPortalSession({
+    required String returnUrl,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/subscriptions/portal',
+      body: {
+        'return_url': returnUrl,
+      },
+    );
+    return response;
+  }
+
+  Future<void> cancelSubscription() async {
+    await _makeRequest(
+      'POST',
+      '/subscriptions/cancel',
+    );
+  }
+
+  Future<List<dynamic>> getPaymentHistory() async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/subscriptions/payments',
+    );
+    return response;
+  }
+
+  // OCR Food Logging methods
+  Future<Map<String, dynamic>> analyzeFoodImage(String imagePath) async {
+    try {
+      final url = Uri.parse('$_baseUrl/nutrition/analyze-food-image');
+      final headers = await _authHeaders;
+
+      var request = http.MultipartRequest('POST', url);
+      request.headers.addAll(headers);
+      request.files.add(await http.MultipartFile.fromPath('file', imagePath));
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      _logger.d('Response ${response.statusCode}: ${response.body}');
+
+      if (response.statusCode >= 400) {
+        final errorData = json.decode(response.body);
+        throw ApiException(
+          errorData['detail'] ?? 'Failed to analyze food image',
+          response.statusCode,
+        );
+      }
+
+      return json.decode(response.body);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to analyze food image: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> analyzeFoodFromUrl(String imageUrl) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/nutrition/analyze-food-url',
+      body: {'image_url': imageUrl},
+    );
+    return response;
+  }
+
+  Future<List<dynamic>> getFoodSuggestions(String query) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/nutrition/food-suggestions?query=${Uri.encodeComponent(query)}',
+    );
+    return response['suggestions'] ?? [];
+  }
+
+  // === Async Generation Methods (SSE) ===
+
+  /// Start async nutrition plan generation
+  Future<Map<String, dynamic>> startNutritionPlanGeneration() async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/nutrition/generate-async',
+    );
+    return response;
+  }
+
+  /// Start async fitness plan generation
+  Future<Map<String, dynamic>> startFitnessPlanGeneration() async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/fitness/generate-async',
+    );
+    return response;
+  }
+
+  /// Get generation status (polling)
+  Future<Map<String, dynamic>> getNutritionGenerationStatus(String taskId) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/nutrition/generation-status/$taskId',
+    );
+    return response;
+  }
+
+  /// Get fitness generation status (polling)
+  Future<Map<String, dynamic>> getFitnessGenerationStatus(String taskId) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/fitness/generation-status/$taskId',
+    );
+    return response;
+  }
+
+  /// Stream nutrition generation status via SSE
+  Stream<GenerationEvent> streamNutritionGenerationStatus(String taskId) {
+    return _streamGenerationStatus('/nutrition/generation-status/$taskId/stream');
+  }
+
+  /// Stream fitness generation status via SSE
+  Stream<GenerationEvent> streamFitnessGenerationStatus(String taskId) {
+    return _streamGenerationStatus('/fitness/generation-status/$taskId/stream');
+  }
+
+  /// Internal method to stream SSE events
+  Stream<GenerationEvent> _streamGenerationStatus(String endpoint) async* {
+    final token = await _token;
+    final url = Uri.parse('$_baseUrl$endpoint');
+
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', url);
+      request.headers['Accept'] = 'text/event-stream';
+      request.headers['Cache-Control'] = 'no-cache';
+      if (token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await client.send(request);
+
+      if (response.statusCode != 200) {
+        yield GenerationEvent(
+          event: 'error',
+          data: {'error': 'Failed to connect to SSE stream'},
+        );
+        return;
+      }
+
+      String buffer = '';
+
+      await for (final chunk in response.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+
+        // SSE format: "event: <type>\ndata: <json>\n\n"
+        while (buffer.contains('\n\n')) {
+          final index = buffer.indexOf('\n\n');
+          final message = buffer.substring(0, index);
+          buffer = buffer.substring(index + 2);
+
+          final event = _parseSSEMessage(message);
+          if (event != null) {
+            yield event;
+
+            // Stop streaming if done or error
+            if (event.event == 'done' || event.event == 'error') {
+              return;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      _logger.e('SSE stream error: $e');
+      yield GenerationEvent(
+        event: 'error',
+        data: {'error': e.toString()},
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  GenerationEvent? _parseSSEMessage(String message) {
+    String? eventType;
+    String? data;
+
+    for (final line in message.split('\n')) {
+      if (line.startsWith('event:')) {
+        eventType = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        data = line.substring(5).trim();
+      }
+    }
+
+    if (data != null) {
+      try {
+        final jsonData = json.decode(data) as Map<String, dynamic>;
+        return GenerationEvent(
+          event: eventType ?? 'message',
+          data: jsonData,
+        );
+      } catch (e) {
+        _logger.e('Failed to parse SSE data: $data');
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // Fitness plan alias for sync service
+  Future<WorkoutPlan?> getCurrentFitnessPlan() async {
+    try {
+      return await getCurrentWorkoutPlan();
+    } catch (e) {
+      if (e.toString().contains('404')) {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  // === Workout Session Methods (Set-level tracking) ===
+
+  /// Start a new workout session
+  Future<WorkoutSession> startWorkoutSession({
+    String? workoutId,
+    required String workoutName,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/workout-sessions/start',
+      body: {
+        if (workoutId != null) 'workout_id': workoutId,
+        'workout_name': workoutName,
+      },
+    );
+    _logger.d('startWorkoutSession response: $response');
+    try {
+      return WorkoutSession.fromJson(response);
+    } catch (e, stackTrace) {
+      _logger.e('Failed to parse WorkoutSession: $e');
+      _logger.e('Response was: $response');
+      _logger.e('Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
+  /// Get the current active workout session
+  Future<WorkoutSession?> getActiveWorkoutSession() async {
+    try {
+      final response = await _makeRequest<Map<String, dynamic>?>(
+        'GET',
+        '/workout-sessions/active',
+      );
+      if (response == null) return null;
+      return WorkoutSession.fromJson(response);
+    } catch (e) {
+      if (e.toString().contains('404')) {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  /// Log a single set in the workout session
+  Future<ExerciseSet> logWorkoutSet({
+    required String sessionId,
+    String? exerciseId,
+    required String exerciseName,
+    required int setNumber,
+    required double weightKg,
+    required int reps,
+    bool isWarmup = false,
+    int restSeconds = 90,
+    String? notes,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/workout-sessions/$sessionId/sets',
+      body: {
+        if (exerciseId != null) 'exercise_id': exerciseId,
+        'exercise_name': exerciseName,
+        'set_number': setNumber,
+        'weight_kg': weightKg,
+        'reps': reps,
+        'is_warmup': isWarmup,
+        'rest_seconds': restSeconds,
+        if (notes != null) 'notes': notes,
+      },
+    );
+    return ExerciseSet.fromJson(response);
+  }
+
+  /// Complete a workout session
+  Future<WorkoutSessionSummary> completeWorkoutSession({
+    required String sessionId,
+    String? notes,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'PUT',
+      '/workout-sessions/$sessionId/complete',
+      body: {
+        if (notes != null) 'notes': notes,
+      },
+    );
+    return WorkoutSessionSummary.fromJson(response);
+  }
+
+  /// Abandon a workout session
+  Future<void> abandonWorkoutSession(String sessionId) async {
+    await _makeRequest(
+      'DELETE',
+      '/workout-sessions/$sessionId',
+    );
+  }
+
+  /// Get workout session history
+  Future<List<WorkoutSession>> getWorkoutSessionHistory({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/workout-sessions/history?limit=$limit&offset=$offset',
+    );
+    return response.map((json) => WorkoutSession.fromJson(json)).toList();
+  }
+
+  /// Get exercise history
+  Future<ExerciseHistory> getExerciseHistory(String exerciseName) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/workout-sessions/exercises/${Uri.encodeComponent(exerciseName)}/history',
+    );
+    return ExerciseHistory.fromJson(response);
+  }
+
+  /// Get all personal records
+  Future<List<PersonalRecord>> getPersonalRecords() async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/workout-sessions/personal-records',
+    );
+    return response.map((json) => PersonalRecord.fromJson(json)).toList();
+  }
+
+  // === Gamification Methods ===
+
+  /// Get user's streak information
+  Future<UserStreak> getStreak() async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/gamification/streak',
+    );
+    return UserStreak.fromJson(response);
+  }
+
+  /// Get all achievements with user's progress
+  Future<List<AchievementProgress>> getAchievementsWithProgress() async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/gamification/achievements',
+    );
+    return response.map((json) => AchievementProgress.fromJson(json)).toList();
+  }
+
+  /// Get user's earned achievements
+  Future<List<UserAchievement>> getEarnedAchievements() async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/gamification/achievements/earned',
+    );
+    return response.map((json) => UserAchievement.fromJson(json)).toList();
+  }
+
+  /// Get unnotified achievements (new achievements to show user)
+  Future<List<NewAchievementNotification>> getUnnotifiedAchievements() async {
+    final response = await _makeRequest<List<dynamic>>(
+      'GET',
+      '/gamification/achievements/unnotified',
+    );
+    return response.map((json) => NewAchievementNotification.fromJson(json)).toList();
+  }
+
+  /// Get complete gamification stats for dashboard
+  Future<GamificationStats> getGamificationStats() async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'GET',
+      '/gamification/stats',
+    );
+    return GamificationStats.fromJson(response);
+  }
+}
+
+/// Event from SSE stream for generation progress
+class GenerationEvent {
+  final String event;
+  final Map<String, dynamic> data;
+
+  GenerationEvent({
+    required this.event,
+    required this.data,
+  });
+
+  String? get taskId => data['id'] as String?;
+  String? get status => data['status'] as String?;
+  int get progress => (data['progress'] as num?)?.toInt() ?? 0;
+  String? get message => data['message'] as String?;
+  String? get resultId => data['result_id'] as String?;
+  String? get error => data['error'] as String?;
+
+  bool get isCompleted => status == 'completed';
+  bool get isFailed => status == 'failed';
+  bool get isInProgress => status == 'in_progress';
 }
 
 // Provider for API service

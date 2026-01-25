@@ -103,3 +103,54 @@ class Meal(Base):
     
     # Relationships
     plan: Mapped["NutritionPlan"] = relationship("NutritionPlan", back_populates="meals")
+
+
+class MealLog(Base):
+    """Log of meals consumed by user"""
+
+    __tablename__ = "meal_logs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # Optional reference to a planned meal
+    meal_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("meals.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Meal details
+    meal_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    meal_type: Mapped[str] = mapped_column(String(50), nullable=False)  # breakfast, lunch, dinner, snack
+
+    # If logging a custom meal (not from plan)
+    custom_meal_name: Mapped[Optional[str]] = mapped_column(String(255))
+    custom_foods: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    # Nutrition info (can differ from planned if user modified portions)
+    calories: Mapped[Optional[int]] = mapped_column(Integer)
+    protein_grams: Mapped[Optional[float]] = mapped_column(DECIMAL(5, 2))
+    carbs_grams: Mapped[Optional[float]] = mapped_column(DECIMAL(5, 2))
+    fat_grams: Mapped[Optional[float]] = mapped_column(DECIMAL(5, 2))
+
+    # User feedback
+    satisfaction_rating: Mapped[Optional[int]] = mapped_column(Integer)  # 1-5
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Tracking how meal was logged
+    log_method: Mapped[Optional[str]] = mapped_column(String(50))  # manual, ocr, barcode
+
+    logged_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=func.now()
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="meal_logs")
+    meal: Mapped[Optional["Meal"]] = relationship("Meal")

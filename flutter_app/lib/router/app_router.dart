@@ -5,48 +5,81 @@ import '../providers/auth_provider.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/register_screen.dart';
 import '../screens/auth/onboarding_screen.dart';
+import '../screens/splash/splash_screen.dart';
 import '../screens/home/dashboard_screen.dart';
 import '../screens/nutrition/nutrition_plan_screen.dart';
+import '../screens/nutrition/food_scanner_screen.dart';
 import '../screens/fitness/fitness_plan_screen.dart';
 import '../screens/progress/progress_screen.dart';
+import '../screens/progress/add_progress_screen.dart';
 import '../screens/ai/ai_chat_screen.dart';
 import '../screens/profile/profile_screen.dart';
+import '../screens/subscription/subscription_screen.dart';
+import '../screens/achievements/achievements_screen.dart';
 import '../screens/main_layout.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
-  
+
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/splash',
     redirect: (context, state) {
-      final isLoggedIn = authState.user != null;
-      final hasCompletedOnboarding = authState.hasCompletedOnboarding;
+      final authStatus = authState.status;
       final currentLocation = state.matchedLocation;
-      
+
+      final isSplashPage = currentLocation == '/splash';
       final isAuthPage = currentLocation == '/login' || currentLocation == '/register';
       final isOnboardingPage = currentLocation == '/onboarding';
-      
-      // If not logged in and trying to access protected routes
-      if (!isLoggedIn && !isAuthPage && !isOnboardingPage) {
-        return '/login';
+
+      // While auth is being determined, stay on splash
+      if (authStatus == AuthStatus.unknown) {
+        if (!isSplashPage) {
+          return '/splash';
+        }
+        return null; // Stay on splash
       }
-      
-      // If logged in
-      if (isLoggedIn) {
-        // User hasn't completed onboarding and not already on onboarding page
-        if (!hasCompletedOnboarding && !isOnboardingPage) {
+
+      // Auth status is now determined, redirect from splash
+      if (isSplashPage) {
+        switch (authStatus) {
+          case AuthStatus.unauthenticated:
+            return '/login';
+          case AuthStatus.needsOnboarding:
+            return '/onboarding';
+          case AuthStatus.authenticated:
+            return '/dashboard';
+          case AuthStatus.unknown:
+            return null; // Stay on splash
+        }
+      }
+
+      // Not on splash, handle normal redirect logic
+      if (authStatus == AuthStatus.unauthenticated) {
+        // User not logged in, must go to auth pages
+        if (!isAuthPage) {
+          return '/login';
+        }
+      } else if (authStatus == AuthStatus.needsOnboarding) {
+        // User logged in but needs onboarding
+        if (!isOnboardingPage) {
           return '/onboarding';
         }
-        
-        // User has completed onboarding but still on auth/onboarding pages
-        if (hasCompletedOnboarding && (isAuthPage || isOnboardingPage)) {
+      } else if (authStatus == AuthStatus.authenticated) {
+        // User fully authenticated, redirect away from auth/onboarding pages
+        if (isAuthPage || isOnboardingPage) {
           return '/dashboard';
         }
       }
-      
+
       return null; // No redirect needed
     },
     routes: [
+      // Splash Screen
+      GoRoute(
+        path: '/splash',
+        name: 'splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
       // Authentication Routes
       GoRoute(
         path: '/login',
@@ -97,6 +130,26 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/profile',
             name: 'profile',
             builder: (context, state) => const ProfileScreen(),
+          ),
+          GoRoute(
+            path: '/subscription',
+            name: 'subscription',
+            builder: (context, state) => const SubscriptionScreen(),
+          ),
+          GoRoute(
+            path: '/food-scanner',
+            name: 'food-scanner',
+            builder: (context, state) => const FoodScannerScreen(),
+          ),
+          GoRoute(
+            path: '/add-progress',
+            name: 'add-progress',
+            builder: (context, state) => const AddProgressScreen(),
+          ),
+          GoRoute(
+            path: '/achievements',
+            name: 'achievements',
+            builder: (context, state) => const AchievementsScreen(),
           ),
         ],
       ),

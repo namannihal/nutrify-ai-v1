@@ -1,11 +1,11 @@
 """User and Profile models"""
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID, uuid4
 from sqlalchemy import Boolean, String, Integer, Text, ARRAY, DECIMAL, Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -77,6 +77,26 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
+    meal_logs: Mapped[list["MealLog"]] = relationship(
+        "MealLog",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    workout_logs: Mapped[list["WorkoutLog"]] = relationship(
+        "WorkoutLog",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    workout_sessions: Mapped[list["WorkoutSession"]] = relationship(
+        "WorkoutSession",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    personal_records: Mapped[list["PersonalRecord"]] = relationship(
+        "PersonalRecord",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
 
 
 class UserProfile(Base):
@@ -117,7 +137,12 @@ class UserProfile(Base):
     workout_duration: Mapped[Optional[str]] = mapped_column(String(20))
     preferred_workout_time: Mapped[Optional[str]] = mapped_column(String(50))
     equipment_access: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
-    
+
+    # JSONB fields for detailed preferences (from questionnaires)
+    unit_preferences: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    fitness_preferences: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    nutrition_preferences: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
     # Privacy & Consent
     data_consent: Mapped[bool] = mapped_column(Boolean, default=False)
     marketing_consent: Mapped[bool] = mapped_column(Boolean, default=False)

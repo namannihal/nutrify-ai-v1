@@ -12,10 +12,10 @@ from sqlalchemy.pool import NullPool
 from app.core.config import settings
 
 # Prepare connect_args for SSL requirement (Supabase & Azure Postgres)
+# Note: asyncpg uses "ssl": "require", but this is for async operations
 connect_args = {}
 if "supabase.co" in settings.DATABASE_URL or "postgres.database.azure.com" in settings.DATABASE_URL:
     connect_args = {
-        "ssl": "require",
         "server_settings": {
             "application_name": "nutrify-backend"
         }

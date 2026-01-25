@@ -11,6 +11,8 @@ import '../../widgets/dashboard/stats_card.dart';
 import '../../widgets/dashboard/quick_actions.dart';
 import '../../widgets/dashboard/recent_meals_card.dart';
 import '../../widgets/dashboard/workout_progress_card.dart';
+import '../../widgets/streak_card.dart';
+import '../../providers/gamification_provider.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -192,9 +194,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   
                   // Quick Actions
                   const QuickActions(),
-                  
+
                   const SizedBox(height: 24),
-                  
+
+                  // Streak Card
+                  StreakCard(
+                    onTap: () => context.go('/achievements'),
+                  ),
+
+                  const SizedBox(height: 24),
+
                   // Today's Nutrition
                   RecentMealsCard(
                     breakfastMeals: nutritionState.currentPlan?.meals

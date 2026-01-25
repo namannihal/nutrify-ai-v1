@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../providers/nutrition_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/progress_provider.dart';
+import '../../providers/generation_provider.dart';
 import '../../models/progress.dart';
+import '../../models/nutrition.dart';
 import '../../widgets/common/loading_overlay.dart';
+import 'nutrition_questionnaire_screen.dart';
 
 class NutritionPlanScreen extends ConsumerStatefulWidget {
   const NutritionPlanScreen({super.key});
@@ -14,12 +18,53 @@ class NutritionPlanScreen extends ConsumerStatefulWidget {
 }
 
 class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
+  int _selectedDay = DateTime.now().weekday; // 1=Monday, 7=Sunday
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(nutritionNotifierProvider.notifier).loadCurrentPlan();
       ref.read(progressNotifierProvider.notifier).loadProgressEntries();
+
+      // Setup generation completion callbacks
+      final generationNotifier = ref.read(generationNotifierProvider.notifier);
+      generationNotifier.onNutritionComplete = (resultId) {
+        // Refresh the nutrition plan when generation completes
+        ref.read(nutritionNotifierProvider.notifier).loadCurrentPlan(forceRefresh: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Expanded(child: Text('Your new meal plan is ready!')),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      };
+      generationNotifier.onNutritionError = (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text('Generation failed: $error')),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      };
     });
   }
 
@@ -28,23 +73,32 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     final nutritionState = ref.watch(nutritionNotifierProvider);
     final profile = ref.watch(authNotifierProvider).profile;
     final progressState = ref.watch(progressNotifierProvider);
+    final generationState = ref.watch(generationNotifierProvider);
     final currentPlan = nutritionState.currentPlan;
+    final nutritionTask = generationState.nutritionTask;
+    final isGenerating = nutritionTask?.isActive ?? false;
     
     // Get daily targets from AI-generated nutrition plan
     final calorieTarget = currentPlan?.dailyCalories ?? _calculateCalorieTarget(profile);
-    final proteinTarget = (currentPlan?.macros['protein_grams'] as num?)?.toInt() ?? 
+    // Backend returns 'protein', 'carbs', 'fat' (not with _grams suffix)
+    final proteinTarget = (currentPlan?.macros['protein'] as num?)?.toInt() ??
                          (calorieTarget * 0.3 / 4).round();
-    final carbsTarget = (currentPlan?.macros['carbs_grams'] as num?)?.toInt() ?? 
+    final carbsTarget = (currentPlan?.macros['carbs'] as num?)?.toInt() ??
                        (calorieTarget * 0.4 / 4).round();
-    final fatTarget = (currentPlan?.macros['fat_grams'] as num?)?.toInt() ?? 
+    final fatTarget = (currentPlan?.macros['fat'] as num?)?.toInt() ??
                      (calorieTarget * 0.3 / 9).round();
     
-    // Get today's meals from the plan
-    final today = DateTime.now().weekday; // 1=Monday, 7=Sunday
-    final todaysMeals = currentPlan?.meals.firstWhere(
-      (meal) => _getDayNumber(meal.day) == today,
-      orElse: () => currentPlan.meals.first,
-    );
+    // Get selected day's meals from the plan
+    DailyMeal? selectedDayMeals;
+    if (currentPlan?.meals != null && currentPlan!.meals.isNotEmpty) {
+      try {
+        selectedDayMeals = currentPlan.meals.firstWhere(
+          (meal) => _getDayNumber(meal.day) == _selectedDay,
+        );
+      } catch (e) {
+        selectedDayMeals = currentPlan.meals.first;
+      }
+    }
     
     // Get today's progress for consumed values
     final todayDate = DateTime.now().toIso8601String().split('T')[0];
@@ -61,32 +115,32 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     
     // Calculate consumed values from today's meals in the AI-generated plan
     // These represent the planned intake for today
-    final consumedCalories = todaysMeals != null ? (
-      todaysMeals.breakfast.fold<int>(0, (sum, meal) => sum + meal.calories) +
-      todaysMeals.lunch.fold<int>(0, (sum, meal) => sum + meal.calories) +
-      todaysMeals.dinner.fold<int>(0, (sum, meal) => sum + meal.calories) +
-      todaysMeals.snacks.fold<int>(0, (sum, meal) => sum + meal.calories)
+    final consumedCalories = selectedDayMeals != null ? (
+      selectedDayMeals.breakfast.fold<int>(0, (sum, meal) => sum + meal.calories) +
+      selectedDayMeals.lunch.fold<int>(0, (sum, meal) => sum + meal.calories) +
+      selectedDayMeals.dinner.fold<int>(0, (sum, meal) => sum + meal.calories) +
+      selectedDayMeals.snacks.fold<int>(0, (sum, meal) => sum + meal.calories)
     ) : 0;
     
-    final consumedProtein = todaysMeals != null ? (
-      todaysMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
-      todaysMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
-      todaysMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
-      todaysMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.proteinGrams)
+    final consumedProtein = selectedDayMeals != null ? (
+      selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
+      selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
+      selectedDayMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
+      selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.proteinGrams)
     ).toInt() : 0;
     
-    final consumedCarbs = todaysMeals != null ? (
-      todaysMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
-      todaysMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
-      todaysMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
-      todaysMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.carbsGrams)
+    final consumedCarbs = selectedDayMeals != null ? (
+      selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
+      selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
+      selectedDayMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
+      selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.carbsGrams)
     ).toInt() : 0;
     
-    final consumedFat = todaysMeals != null ? (
-      todaysMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
-      todaysMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
-      todaysMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
-      todaysMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.fatGrams)
+    final consumedFat = selectedDayMeals != null ? (
+      selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
+      selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
+      selectedDayMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
+      selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.fatGrams)
     ).toInt() : 0;
 
     return Scaffold(
@@ -94,21 +148,71 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
         title: const Text('Nutrition Plan'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.calendar_today),
+            icon: const Icon(Icons.camera_alt),
             onPressed: () {
-              // TODO: Show date picker
+              context.push('/food-scanner');
             },
+            tooltip: 'Scan Food',
           ),
+          // Regenerate button hidden - AI generation coming soon
+          // if (currentPlan != null)
+          //   IconButton(
+          //     icon: const Icon(Icons.refresh),
+          //     onPressed: nutritionState.isLoading ? null : () => _showRegenerateDialog(context, ref),
+          //     tooltip: 'Regenerate Plan',
+          //   ),
         ],
       ),
       body: LoadingOverlay(
-        isLoading: nutritionState.isLoading,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Daily Summary Card
+        isLoading: nutritionState.isLoading && !isGenerating,
+        child: Column(
+          children: [
+            // Background Generation Progress Banner
+            if (isGenerating)
+              _buildGenerationBanner(context, nutritionTask!),
+
+            // Day Selector
+            Container(
+              height: 60,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: 7,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemBuilder: (context, index) {
+                  final dayNumber = index + 1; // 1=Monday, 7=Sunday
+                  final dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                  final isSelected = dayNumber == _selectedDay;
+                  final isToday = dayNumber == DateTime.now().weekday;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: FilterChip(
+                      label: Text(dayNames[index]),
+                      selected: isSelected,
+                      showCheckmark: false,
+                      avatar: isToday && !isSelected
+                          ? const Icon(Icons.circle, size: 8)
+                          : null,
+                      onSelected: (selected) {
+                        setState(() {
+                          _selectedDay = dayNumber;
+                        });
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            // Content
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Daily Summary Card
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -155,6 +259,29 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        // Coming Soon Badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.orange.shade400,
+                                Colors.deepOrange.shade400,
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'COMING SOON',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
                         Icon(
                           Icons.restaurant_menu,
                           size: 80,
@@ -162,113 +289,52 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                         ),
                         const SizedBox(height: 24),
                         Text(
-                          'No Nutrition Plan Found',
+                          'AI Meal Planning',
                           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Generate your personalized meal plan\npowered by AI',
+                          'Personalized meal plans powered by AI\nare coming very soon!',
                           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 32),
-                        FilledButton.icon(
-                          onPressed: nutritionState.isLoading ? null : () async {
-                            // Show loading dialog
-                            showDialog(
-                              context: context,
-                              barrierDismissible: false,
-                              useRootNavigator: true,
-                              builder: (context) => const Center(
-                                child: Card(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(24.0),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        CircularProgressIndicator(),
-                                        SizedBox(height: 16),
-                                        Text('Generating your personalized meal plan...'),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-
-                            // Generate plan using AI
-                            bool success = false;
-                            try {
-                              success = await ref
-                                  .read(nutritionNotifierProvider.notifier)
-                                  .generateNewPlan();
-                            } finally {
-                              // Close loading dialog safely
-                              if (context.mounted) {
-                                Navigator.of(context, rootNavigator: true).pop();
-                              }
-                            }
-
-                            // Show result
-                            if (context.mounted) {
-                              if (success) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Row(
-                                      children: [
-                                        Icon(Icons.check_circle, color: Colors.white),
-                                        SizedBox(width: 12),
-                                        Expanded(
-                                          child: Text('AI meal plan generated successfully!'),
-                                        ),
-                                      ],
-                                    ),
-                                    backgroundColor: Colors.green,
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Row(
-                                      children: [
-                                        const Icon(Icons.error_outline, color: Colors.white),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Text(
-                                            nutritionState.error ?? 'Failed to generate plan. Please try again.',
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    backgroundColor: Colors.red,
-                                    behavior: SnackBarBehavior.floating,
-                                    duration: const Duration(seconds: 4),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.auto_awesome),
-                          label: const Text('Generate AI Meal Plan'),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
-                              vertical: 16,
-                            ),
-                            textStyle: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        const SizedBox(height: 24),
+                        // Feature preview list
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              _buildFeaturePreviewItem(context, Icons.auto_awesome, 'AI-generated personalized meals'),
+                              const SizedBox(height: 12),
+                              _buildFeaturePreviewItem(context, Icons.calculate, 'Automatic macro calculations'),
+                              const SizedBox(height: 12),
+                              _buildFeaturePreviewItem(context, Icons.restaurant, 'Based on your dietary preferences'),
+                              const SizedBox(height: 12),
+                              _buildFeaturePreviewItem(context, Icons.calendar_month, 'Weekly meal planning'),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 24),
+                        // Complete Nutrition Profile CTA
+                        FilledButton.icon(
+                          onPressed: () => _showNutritionQuestionnaire(context),
+                          icon: const Icon(Icons.assignment),
+                          label: const Text('Complete Nutrition Profile'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         Text(
-                          'This will take 5-10 seconds',
+                          'Complete your profile to get personalized meal plans',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.outline,
                           ),
@@ -278,59 +344,66 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                   ),
                 ),
               
-              if (currentPlan != null && todaysMeals?.breakfast.isNotEmpty == true)
-                ...todaysMeals!.breakfast.map((meal) => Padding(
+              if (currentPlan != null && selectedDayMeals?.breakfast.isNotEmpty == true)
+                ...selectedDayMeals!.breakfast.map((meal) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _buildMealCard(
-                    context, 
-                    'Breakfast', 
+                    context,
+                    meal,
+                    'Breakfast',
                     meal.name,
-                    '${meal.calories} kcal', 
-                    Icons.wb_sunny, 
+                    '${meal.calories} kcal',
+                    Icons.wb_sunny,
                     Colors.orange,
                   ),
                 )),
-              
-              if (currentPlan != null && todaysMeals?.lunch.isNotEmpty == true)
-                ...todaysMeals!.lunch.map((meal) => Padding(
+
+              if (currentPlan != null && selectedDayMeals?.lunch.isNotEmpty == true)
+                ...selectedDayMeals!.lunch.map((meal) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _buildMealCard(
-                    context, 
-                    'Lunch', 
+                    context,
+                    meal,
+                    'Lunch',
                     meal.name,
-                    '${meal.calories} kcal', 
-                    Icons.wb_cloudy, 
+                    '${meal.calories} kcal',
+                    Icons.wb_cloudy,
                     Colors.blue,
                   ),
                 )),
-              
-              if (currentPlan != null && todaysMeals?.snacks.isNotEmpty == true)
-                ...todaysMeals!.snacks.map((meal) => Padding(
+
+              if (currentPlan != null && selectedDayMeals?.snacks.isNotEmpty == true)
+                ...selectedDayMeals!.snacks.map((meal) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _buildMealCard(
-                    context, 
-                    'Snack', 
+                    context,
+                    meal,
+                    'Snack',
                     meal.name,
-                    '${meal.calories} kcal', 
-                    Icons.coffee, 
+                    '${meal.calories} kcal',
+                    Icons.coffee,
                     Colors.brown,
                   ),
                 )),
-              
-              if (currentPlan != null && todaysMeals?.dinner.isNotEmpty == true)
-                ...todaysMeals!.dinner.map((meal) => Padding(
+
+              if (currentPlan != null && selectedDayMeals?.dinner.isNotEmpty == true)
+                ...selectedDayMeals!.dinner.map((meal) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _buildMealCard(
-                    context, 
-                    'Dinner', 
+                    context,
+                    meal,
+                    'Dinner',
                     meal.name,
-                    '${meal.calories} kcal', 
-                    Icons.nights_stay, 
+                    '${meal.calories} kcal',
+                    Icons.nights_stay,
                     Colors.indigo,
                   ),
                 )),
-            ],
-          ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -417,7 +490,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     );
   }
 
-  Widget _buildMealCard(BuildContext context, String meal, String description, String calories, IconData icon, Color color) {
+  Widget _buildMealCard(BuildContext context, dynamic mealData, String mealType, String description, String calories, IconData icon, Color color) {
     return Card(
       child: ListTile(
         leading: Container(
@@ -430,7 +503,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
           child: Icon(icon, color: color),
         ),
         title: Text(
-          meal,
+          mealType,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(description),
@@ -449,8 +522,453 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
           ],
         ),
         onTap: () {
-          // TODO: Show meal details
+          _showMealOptions(context, mealData, mealType);
         },
+      ),
+    );
+  }
+
+  void _showMealOptions(BuildContext context, dynamic meal, String mealType) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.outline,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meal.name,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$mealType • ${meal.calories} kcal',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.check_circle, color: Colors.green),
+              title: const Text('Log as Eaten'),
+              subtitle: const Text('Add to today\'s food log'),
+              onTap: () {
+                Navigator.pop(context);
+                _logMeal(meal, mealType);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary),
+              title: const Text('View Details'),
+              subtitle: const Text('See full recipe and nutrition'),
+              onTap: () {
+                Navigator.pop(context);
+                _showMealDetails(context, meal, mealType);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.swap_horiz, color: Colors.orange),
+              title: const Text('Suggest Alternative'),
+              subtitle: const Text('Get a similar meal option'),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Alternative suggestion feature coming soon!'),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logMeal(dynamic meal, String mealType) async {
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Logging meal...'),
+            ],
+          ),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      // Get today's date in correct format
+      final today = DateTime.now().toIso8601String().split('T')[0];
+
+      // Log the meal using the API
+      final success = await ref.read(nutritionNotifierProvider.notifier).logMeal(
+        mealDate: today,
+        mealType: mealType.toLowerCase(),
+        mealId: meal.id,
+        customMealName: meal.name,
+        calories: meal.calories,
+        proteinGrams: meal.proteinGrams,
+        carbsGrams: meal.carbsGrams,
+        fatGrams: meal.fatGrams,
+      );
+
+      if (!mounted) return;
+
+      // Show result
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                success ? Icons.check_circle : Icons.error_outline,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  success
+                      ? 'Logged ${meal.name} (${meal.calories} kcal)'
+                      : 'Failed to log meal. Please try again.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: success ? Colors.green : Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to log meal: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showMealDetails(BuildContext context, dynamic meal, String mealType) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(meal.name),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Meal type and calories
+              Row(
+                children: [
+                  Chip(
+                    label: Text(mealType),
+                    avatar: const Icon(Icons.restaurant, size: 16),
+                  ),
+                  const SizedBox(width: 8),
+                  Chip(
+                    label: Text('${meal.calories} kcal'),
+                    backgroundColor: Colors.orange.withOpacity(0.1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Description
+              if (meal.description != null && meal.description.isNotEmpty) ...[
+                Text(
+                  'Description',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(meal.description),
+                const SizedBox(height: 16),
+              ],
+
+              // Macros
+              Text(
+                'Macronutrients',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildNutrientInfo('Protein', '${meal.proteinGrams}g', Colors.red),
+                  _buildNutrientInfo('Carbs', '${meal.carbsGrams}g', Colors.blue),
+                  _buildNutrientInfo('Fat', '${meal.fatGrams}g', Colors.green),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Ingredients
+              if (meal.ingredients != null && meal.ingredients.isNotEmpty) ...[
+                Text(
+                  'Ingredients',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...meal.ingredients.entries.map((entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.circle, size: 6),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('${entry.key}: ${entry.value}'),
+                      ),
+                    ],
+                  ),
+                )),
+                const SizedBox(height: 16),
+              ],
+
+              // Instructions
+              if (meal.instructions != null && meal.instructions.isNotEmpty) ...[
+                Text(
+                  'Instructions',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(meal.instructions),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _logMeal(meal, mealType);
+            },
+            icon: const Icon(Icons.check_circle),
+            label: const Text('Log as Eaten'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNutrientInfo(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: color,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showNutritionQuestionnaire(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NutritionQuestionnaireScreen(
+          onComplete: () {
+            // Questionnaire completed - show success message
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Nutrition profile saved! AI meal planning coming soon.'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeaturePreviewItem(BuildContext context, IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 20,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showRegenerateDialog(BuildContext context, WidgetRef ref) {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Regenerate Meal Plan?'),
+        content: const Text(
+          'This will create a new AI-generated meal plan with different meals. '
+          'Your current plan will be replaced. Generation happens in the background.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+
+              // Start background generation using SSE
+              final started = await ref
+                  .read(generationNotifierProvider.notifier)
+                  .startNutritionGeneration();
+
+              if (started) {
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(
+                    content: Row(
+                      children: [
+                        Icon(Icons.auto_awesome, color: Colors.white),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text('Regenerating meal plan in the background...'),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: Colors.blue,
+                    behavior: SnackBarBehavior.floating,
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              }
+            },
+            child: const Text('Regenerate'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGenerationBanner(BuildContext context, GenerationTaskState task) {
+    final progress = task.progress;
+    final message = task.message ?? 'Generating...';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              value: progress > 0 ? progress / 100 : null,
+              strokeWidth: 3,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Generating Meal Plan',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                Text(
+                  message,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (progress > 0)
+            Text(
+              '$progress%',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+        ],
       ),
     );
   }

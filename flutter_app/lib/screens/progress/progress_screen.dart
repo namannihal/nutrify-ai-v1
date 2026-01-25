@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/progress_provider.dart';
+import '../../models/progress.dart';
 
 class ProgressScreen extends ConsumerWidget {
   const ProgressScreen({super.key});
@@ -30,7 +34,7 @@ class ProgressScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
             onPressed: () {
-              // TODO: Add progress entry
+              context.push('/add-progress');
             },
           ),
         ],
@@ -89,15 +93,9 @@ class ProgressScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Container(
+                    SizedBox(
                       height: 200,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Center(
-                        child: Text('Weight Chart Placeholder'),
-                      ),
+                      child: _buildWeightChart(context, progressState.entries),
                     ),
                   ],
                 ),
@@ -193,7 +191,172 @@ class ProgressScreen extends ConsumerWidget {
     );
   }
 
-  List<Widget> _buildAchievements(BuildContext context, List<dynamic> entries) {
+  Widget _buildWeightChart(BuildContext context, List<ProgressEntry> entries) {
+    // Filter entries with weight data and sort by date (oldest first for chart)
+    final weightEntries = entries
+        .where((e) => e.weight != null)
+        .toList()
+      ..sort((a, b) => a.entryDate.compareTo(b.entryDate));
+
+    if (weightEntries.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.show_chart,
+              size: 48,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No weight data yet',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Add progress entries to see your chart',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Take last 14 entries max for better visualization
+    final chartEntries = weightEntries.length > 14
+        ? weightEntries.sublist(weightEntries.length - 14)
+        : weightEntries;
+
+    // Create spots for the chart
+    final spots = <FlSpot>[];
+    for (int i = 0; i < chartEntries.length; i++) {
+      spots.add(FlSpot(i.toDouble(), chartEntries[i].weight!));
+    }
+
+    // Calculate min/max for Y axis
+    final weights = chartEntries.map((e) => e.weight!).toList();
+    final minWeight = weights.reduce((a, b) => a < b ? a : b);
+    final maxWeight = weights.reduce((a, b) => a > b ? a : b);
+    final padding = (maxWeight - minWeight) * 0.2;
+    final yMin = (minWeight - padding).clamp(0.0, double.infinity);
+    final yMax = maxWeight + padding;
+
+    return LineChart(
+      LineChartData(
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: (yMax - yMin) / 4,
+          getDrawingHorizontalLine: (value) {
+            return FlLine(
+              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
+              strokeWidth: 1,
+            );
+          },
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              interval: chartEntries.length > 7 ? 2 : 1,
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index < 0 || index >= chartEntries.length) {
+                  return const SizedBox.shrink();
+                }
+                final date = DateTime.parse(chartEntries[index].entryDate);
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    DateFormat('d/M').format(date),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 10,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 45,
+              interval: (yMax - yMin) / 4,
+              getTitlesWidget: (value, meta) {
+                return Text(
+                  '${value.toStringAsFixed(1)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        minX: 0,
+        maxX: (chartEntries.length - 1).toDouble(),
+        minY: yMin,
+        maxY: yMax,
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.3,
+            color: Theme.of(context).colorScheme.primary,
+            barWidth: 3,
+            isStrokeCapRound: true,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                return FlDotCirclePainter(
+                  radius: 4,
+                  color: Theme.of(context).colorScheme.primary,
+                  strokeWidth: 2,
+                  strokeColor: Theme.of(context).colorScheme.surface,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+            ),
+          ),
+        ],
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (touchedSpots) {
+              return touchedSpots.map((spot) {
+                final index = spot.x.toInt();
+                final entry = chartEntries[index];
+                final date = DateTime.parse(entry.entryDate);
+                return LineTooltipItem(
+                  '${DateFormat('MMM d').format(date)}\n${spot.y.toStringAsFixed(1)} kg',
+                  TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                );
+              }).toList();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildAchievements(BuildContext context, List<ProgressEntry> entries) {
     final List<Widget> achievements = [];
     
     if (entries.isEmpty) {
@@ -331,7 +494,7 @@ class ProgressScreen extends ConsumerWidget {
     return achievements;
   }
   
-  int _calculateStreak(List<dynamic> entries) {
+  int _calculateStreak(List<ProgressEntry> entries) {
     if (entries.isEmpty) return 0;
     
     // Sort entries by date (most recent first)

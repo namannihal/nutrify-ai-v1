@@ -35,6 +35,19 @@ config = context.config
 # Override the sqlalchemy.url with the one from settings
 # Replace postgresql+asyncpg with postgresql for Alembic
 database_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
+# Remove SSL parameters that psycopg2 doesn't understand in the connection string
+# SSL should be handled via connect_args in production, not in the URL
+if "?ssl=" in database_url or "&ssl=" in database_url:
+    # Remove ssl parameter from URL
+    import re
+    database_url = re.sub(r'[?&]ssl=[^&]*', '', database_url)
+    # Clean up any leftover & at the start of query string
+    database_url = database_url.replace('?&', '?')
+    # Remove empty query string
+    if database_url.endswith('?'):
+        database_url = database_url[:-1]
+
 # Escape % characters for ConfigParser (% -> %%)
 database_url_escaped = database_url.replace("%", "%%")
 config.set_main_option("sqlalchemy.url", database_url_escaped)

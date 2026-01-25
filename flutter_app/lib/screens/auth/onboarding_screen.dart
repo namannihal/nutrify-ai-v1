@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/nutrition_provider.dart';
-import '../../providers/fitness_provider.dart';
 import '../../widgets/common/loading_overlay.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -21,17 +19,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   // Form controllers
   final _ageController = TextEditingController();
   final _heightController = TextEditingController();
+  final _heightFeetController = TextEditingController();
+  final _heightInchesController = TextEditingController();
   final _weightController = TextEditingController();
-  
+
+  // Unit preferences
+  bool _useMetricHeight = true; // true = cm, false = ft/in
+  bool _useMetricWeight = true; // true = kg, false = lbs
+
   // Form data
   String? _gender;
-  String? _primaryGoal;
-  String? _activityLevel;
-  String? _fitnessExperience;
-  List<String> _selectedDietaryRestrictions = [];
-  String? _mealsPerDay;
-  String? _workoutDaysPerWeek;
-  List<String> _selectedEquipment = [];
+  String? _activityLevel; // Still needed for TDEE calculation
   bool _dataConsent = false;
   bool _healthDisclaimer = false;
 
@@ -61,6 +59,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     _pageController.dispose();
     _ageController.dispose();
     _heightController.dispose();
+    _heightFeetController.dispose();
+    _heightInchesController.dispose();
     _weightController.dispose();
     super.dispose();
   }
@@ -89,17 +89,65 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     _pageController.jumpToPage(_welcomePages.length);
   }
 
-  int get _totalPages => _welcomePages.length + 5; // Welcome pages + 5 form pages
+  int get _totalPages => _welcomePages.length + 2; // Welcome pages + 2 form pages (Body Metrics, Consent)
+
+  /// Convert height to cm for storage
+  double _getHeightInCm() {
+    if (_useMetricHeight) {
+      return double.parse(_heightController.text);
+    } else {
+      // Convert ft/in to cm
+      final feet = double.tryParse(_heightFeetController.text) ?? 0;
+      final inches = double.tryParse(_heightInchesController.text) ?? 0;
+      return (feet * 30.48) + (inches * 2.54);
+    }
+  }
+
+  /// Convert weight to kg for storage
+  double _getWeightInKg() {
+    final weight = double.parse(_weightController.text);
+    if (_useMetricWeight) {
+      return weight;
+    } else {
+      // Convert lbs to kg
+      return weight * 0.453592;
+    }
+  }
 
   Future<void> _submitProfile() async {
-    // Validate required fields
-    if (_ageController.text.isEmpty || _heightController.text.isEmpty || 
-        _weightController.text.isEmpty || _gender == null || _primaryGoal == null ||
-        _activityLevel == null || !_dataConsent || !_healthDisclaimer) {
+    // Debug: Print all field values
+    debugPrint('=== ONBOARDING VALIDATION ===');
+    debugPrint('Age: ${_ageController.text}');
+    debugPrint('Gender: $_gender');
+    debugPrint('Height (metric=$_useMetricHeight): ${_heightController.text} | ft=${_heightFeetController.text} in=${_heightInchesController.text}');
+    debugPrint('Weight: ${_weightController.text}');
+    debugPrint('Activity Level: $_activityLevel');
+    debugPrint('Data Consent: $_dataConsent');
+    debugPrint('Health Disclaimer: $_healthDisclaimer');
+    debugPrint('=============================');
+
+    // Validate required fields with specific error messages
+    final heightValid = _useMetricHeight
+        ? _heightController.text.isNotEmpty
+        : (_heightFeetController.text.isNotEmpty || _heightInchesController.text.isNotEmpty);
+
+    // Build list of missing fields for better UX
+    final missingFields = <String>[];
+    if (_ageController.text.isEmpty) missingFields.add('Age');
+    if (_gender == null) missingFields.add('Gender');
+    if (!heightValid) missingFields.add('Height');
+    if (_weightController.text.isEmpty) missingFields.add('Weight');
+    if (_activityLevel == null) missingFields.add('Activity Level');
+    if (!_dataConsent) missingFields.add('Data Consent');
+    if (!_healthDisclaimer) missingFields.add('Health Disclaimer');
+
+    if (missingFields.isNotEmpty) {
+      debugPrint('MISSING FIELDS: $missingFields');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Please fill all required fields and accept the terms'),
+          content: Text('Missing: ${missingFields.join(", ")}'),
           backgroundColor: Theme.of(context).colorScheme.error,
+          duration: const Duration(seconds: 4),
         ),
       );
       return;
@@ -107,123 +155,92 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
     setState(() => _isSubmitting = true);
 
-    try {
-      final profileData = {
-        'age': int.parse(_ageController.text),
-        'gender': _gender,
-        'height': double.parse(_heightController.text),
-        'weight': double.parse(_weightController.text),
-        'primary_goal': _primaryGoal,
-        'activity_level': _activityLevel,
-        'fitness_experience': _fitnessExperience,
-        'dietary_restrictions': _selectedDietaryRestrictions,
-        'meals_per_day': _mealsPerDay != null ? int.parse(_mealsPerDay!) : 3,
-        'workout_days_per_week': _workoutDaysPerWeek,
-        'equipment_access': _selectedEquipment,
-        'data_consent': _dataConsent,
-        'health_disclaimer': _healthDisclaimer,
-        'onboarding_completed': true, // Mark onboarding as complete
-      };
-
-      // Step 1: Update profile
-      final success = await ref.read(authNotifierProvider.notifier).updateProfile(profileData);
-      
-      if (!success) {
-        throw Exception('Failed to update profile');
-      }
-      
-      // Step 2: Auto-generate AI plans
-      if (mounted) {
-        // Show generating dialog
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => WillPopScope(
-            onWillPop: () async => false,
-            child: Center(
-              child: Card(
-                margin: const EdgeInsets.all(32),
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 24),
-                      Text(
-                        'Setting up your personalized plans...',
-                        style: Theme.of(context).textTheme.titleMedium,
-                        textAlign: TextAlign.center,
+    // Show loading dialog
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PopScope(
+          canPop: false,
+          child: Center(
+            child: Card(
+              margin: const EdgeInsets.all(32),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Creating Your Profile',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Generating AI meal and workout plans',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        textAlign: TextAlign.center,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Setting up your personalized health journey',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'This may take 10-15 seconds',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-        );
+        ),
+      );
+    }
 
-        // Generate both plans in parallel
-        final results = await Future.wait([
-          ref.read(nutritionNotifierProvider.notifier).generateNewPlan(),
-          ref.read(fitnessNotifierProvider.notifier).generateNewPlan(),
-        ]);
+    try {
+      final profileData = {
+        'age': int.parse(_ageController.text),
+        'gender': _gender,
+        'height': _getHeightInCm(),
+        'weight': _getWeightInKg(),
+        'activity_level': _activityLevel,
+        'data_consent': _dataConsent,
+        'health_disclaimer': _healthDisclaimer,
+        'onboarding_completed': true,
+        // Store unit preferences for display
+        'unit_preferences': {
+          'height_metric': _useMetricHeight,
+          'weight_metric': _useMetricWeight,
+        },
+      };
 
-        final nutritionSuccess = results[0];
-        final fitnessSuccess = results[1];
+      // Update profile
+      final success = await ref.read(authNotifierProvider.notifier).updateProfile(profileData);
 
-        // Close loading dialog
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
 
-        // Navigate to dashboard
-        if (mounted) {
-          context.go('/dashboard');
-          
-          // Show success message after navigation
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              final message = nutritionSuccess && fitnessSuccess
-                  ? '🎉 Your personalized plans are ready!'
-                  : nutritionSuccess
-                      ? '✓ Meal plan ready! Workout plan failed.'
-                      : fitnessSuccess
-                          ? '✓ Workout plan ready! Meal plan failed.'
-                          : '⚠️ Plans generation failed. Please try manually.';
-              
-              final color = nutritionSuccess && fitnessSuccess
-                  ? Colors.green
-                  : nutritionSuccess || fitnessSuccess
-                      ? Colors.orange
-                      : Colors.red;
+      if (!success) {
+        throw Exception('Failed to update profile');
+      }
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(message),
-                  backgroundColor: color,
-                  behavior: SnackBarBehavior.floating,
-                  duration: const Duration(seconds: 4),
-                ),
-              );
-            }
-          });
-        }
+      // Navigate directly to dashboard - no auto plan generation
+      if (mounted) {
+        context.go('/dashboard');
+
+        // Show welcome message
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Welcome! Explore the app and generate personalized plans when ready.'),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        });
       }
     } catch (e) {
       // Try to close any dialogs safely
@@ -234,7 +251,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       } catch (_) {
         // Dialog might not be open, ignore
       }
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -296,16 +313,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 child: PageView(
                   controller: _pageController,
                   onPageChanged: (index) => setState(() => _currentPage = index),
-                  physics: NeverScrollableScrollPhysics(), // Disable swipe
+                  physics: const NeverScrollableScrollPhysics(), // Disable swipe
                   children: [
                     // Welcome pages
                     ..._welcomePages.map((page) => _buildWelcomePage(page)),
-                    
-                    // Profile setup pages
-                    _buildBasicInfoPage(),
-                    _buildGoalsPage(),
-                    _buildFitnessPage(),
-                    _buildNutritionPage(),
+
+                    // Simplified profile setup pages (2 only)
+                    _buildBodyMetricsPage(),
                     _buildConsentPage(),
                   ],
                 ),
@@ -402,7 +416,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  Widget _buildBasicInfoPage() {
+  Widget _buildBodyMetricsPage() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
@@ -416,291 +430,165 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'This helps us create a personalized plan just for you',
+            'This helps us calculate your nutritional needs',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 32),
-          
+
+          // Age
           TextFormField(
             controller: _ageController,
             keyboardType: TextInputType.number,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Age *',
               prefixIcon: Icon(Icons.cake),
+              hintText: 'Enter your age',
             ),
           ),
           const SizedBox(height: 16),
-          
+
+          // Gender
           DropdownButtonFormField<String>(
             value: _gender,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Gender *',
               prefixIcon: Icon(Icons.person),
             ),
             items: ['male', 'female', 'other'].map((gender) {
               return DropdownMenuItem(
                 value: gender,
-                child: Text(gender.toUpperCase()),
+                child: Text(gender[0].toUpperCase() + gender.substring(1)),
               );
             }).toList(),
             onChanged: (value) => setState(() => _gender = value),
           ),
-          const SizedBox(height: 16),
-          
+          const SizedBox(height: 24),
+
+          // Height with unit toggle
           Row(
             children: [
-              Expanded(
-                child: TextFormField(
-                  controller: _heightController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'Height (cm) *',
-                    prefixIcon: Icon(Icons.height),
-                  ),
+              Text(
+                'Height *',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: TextFormField(
-                  controller: _weightController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'Weight (kg) *',
-                    prefixIcon: Icon(Icons.monitor_weight),
-                  ),
-                ),
+              const Spacer(),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('cm')),
+                  ButtonSegment(value: false, label: Text('ft/in')),
+                ],
+                selected: {_useMetricHeight},
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _useMetricHeight = selection.first;
+                    // Clear values when switching
+                    _heightController.clear();
+                    _heightFeetController.clear();
+                    _heightInchesController.clear();
+                  });
+                },
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGoalsPage() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'What\'s your goal?',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Choose your primary fitness objective',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 24),
-          
-          ...['weight_loss', 'muscle_gain', 'maintenance', 'endurance', 'strength'].map((goal) {
-            final isSelected = _primaryGoal == goal;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12.0),
-              child: InkWell(
-                onTap: () => setState(() => _primaryGoal = goal),
-                child: Container(
-                  padding: const EdgeInsets.all(16.0),
-                  decoration: BoxDecoration(
-                    color: isSelected 
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : Theme.of(context).colorScheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected 
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.transparent,
-                      width: 2,
+          const SizedBox(height: 12),
+          if (_useMetricHeight)
+            TextFormField(
+              controller: _heightController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Height (cm)',
+                prefixIcon: Icon(Icons.height),
+                hintText: 'e.g., 170',
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _heightFeetController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Feet',
+                      prefixIcon: Icon(Icons.height),
+                      hintText: 'e.g., 5',
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _getGoalIcon(goal),
-                        color: isSelected 
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 16),
-                      Text(
-                        _formatGoalText(goal),
-                        style: TextStyle(
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          color: isSelected 
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _heightInchesController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Inches',
+                      hintText: 'e.g., 8',
+                    ),
                   ),
                 ),
-              ),
-            );
-          }).toList(),
-        ],
-      ),
-    );
-  }
+              ],
+            ),
+          const SizedBox(height: 24),
 
-  Widget _buildFitnessPage() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Fitness Details',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
+          // Weight with unit toggle
+          Row(
+            children: [
+              Text(
+                'Weight *',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const Spacer(),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('kg')),
+                  ButtonSegment(value: false, label: Text('lbs')),
+                ],
+                selected: {_useMetricWeight},
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _useMetricWeight = selection.first;
+                    _weightController.clear();
+                  });
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _weightController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: _useMetricWeight ? 'Weight (kg)' : 'Weight (lbs)',
+              prefixIcon: const Icon(Icons.monitor_weight),
+              hintText: _useMetricWeight ? 'e.g., 70' : 'e.g., 154',
             ),
           ),
           const SizedBox(height: 24),
-          
+
+          // Activity Level
           DropdownButtonFormField<String>(
             value: _activityLevel,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Activity Level *',
               prefixIcon: Icon(Icons.directions_run),
             ),
-            items: ['sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extremely_active']
-                .map((level) => DropdownMenuItem(
-                      value: level,
-                      child: Text(_formatActivityLevel(level)),
-                    ))
-                .toList(),
+            items: [
+              {'value': 'sedentary', 'label': 'Sedentary', 'desc': 'Little or no exercise'},
+              {'value': 'lightly_active', 'label': 'Lightly Active', 'desc': 'Light exercise 1-3 days/week'},
+              {'value': 'moderately_active', 'label': 'Moderately Active', 'desc': 'Moderate exercise 3-5 days/week'},
+              {'value': 'very_active', 'label': 'Very Active', 'desc': 'Hard exercise 6-7 days/week'},
+              {'value': 'extremely_active', 'label': 'Extremely Active', 'desc': 'Very hard exercise & physical job'},
+            ].map((level) => DropdownMenuItem(
+              value: level['value'],
+              child: Text(level['label']!),
+            )).toList(),
             onChanged: (value) => setState(() => _activityLevel = value),
-          ),
-          const SizedBox(height: 16),
-          
-          DropdownButtonFormField<String>(
-            value: _fitnessExperience,
-            decoration: InputDecoration(
-              labelText: 'Fitness Experience',
-              prefixIcon: Icon(Icons.fitness_center),
-            ),
-            items: ['beginner', 'intermediate', 'advanced']
-                .map((exp) => DropdownMenuItem(
-                      value: exp,
-                      child: Text(exp.toUpperCase()),
-                    ))
-                .toList(),
-            onChanged: (value) => setState(() => _fitnessExperience = value),
-          ),
-          const SizedBox(height: 16),
-          
-          DropdownButtonFormField<String>(
-            value: _workoutDaysPerWeek,
-            decoration: InputDecoration(
-              labelText: 'Workout Days Per Week',
-              prefixIcon: Icon(Icons.calendar_today),
-            ),
-            items: ['3', '4', '5', '6', '7']
-                .map((days) => DropdownMenuItem(
-                      value: days,
-                      child: Text('$days days'),
-                    ))
-                .toList(),
-            onChanged: (value) => setState(() => _workoutDaysPerWeek = value),
-          ),
-          const SizedBox(height: 24),
-          
-          Text(
-            'Available Equipment',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: ['dumbbells', 'barbell', 'resistance_bands', 'pull_up_bar', 'none'].map((equipment) {
-              final isSelected = _selectedEquipment.contains(equipment);
-              return FilterChip(
-                label: Text(_formatEquipment(equipment)),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() {
-                    if (selected) {
-                      _selectedEquipment.add(equipment);
-                    } else {
-                      _selectedEquipment.remove(equipment);
-                    }
-                  });
-                },
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNutritionPage() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Nutrition Preferences',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 24),
-          
-          DropdownButtonFormField<String>(
-            value: _mealsPerDay,
-            decoration: InputDecoration(
-              labelText: 'Meals Per Day',
-              prefixIcon: Icon(Icons.restaurant),
-            ),
-            items: ['3', '4', '5', '6']
-                .map((meals) => DropdownMenuItem(
-                      value: meals,
-                      child: Text('$meals meals'),
-                    ))
-                .toList(),
-            onChanged: (value) => setState(() => _mealsPerDay = value),
-          ),
-          const SizedBox(height: 24),
-          
-          Text(
-            'Dietary Restrictions',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: ['vegetarian', 'vegan', 'gluten_free', 'dairy_free', 'keto', 'paleo', 'none'].map((restriction) {
-              final isSelected = _selectedDietaryRestrictions.contains(restriction);
-              return FilterChip(
-                label: Text(_formatDietaryRestriction(restriction)),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() {
-                    if (selected) {
-                      _selectedDietaryRestrictions.add(restriction);
-                    } else {
-                      _selectedDietaryRestrictions.remove(restriction);
-                    }
-                  });
-                },
-              );
-            }).toList(),
           ),
         ],
       ),
@@ -779,32 +667,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  IconData _getGoalIcon(String goal) {
-    switch (goal) {
-      case 'weight_loss': return Icons.trending_down;
-      case 'muscle_gain': return Icons.fitness_center;
-      case 'maintenance': return Icons.balance;
-      case 'endurance': return Icons.directions_run;
-      case 'strength': return Icons.sports_martial_arts;
-      default: return Icons.flag;
-    }
-  }
-
-  String _formatGoalText(String goal) {
-    return goal.split('_').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
-  }
-
-  String _formatActivityLevel(String level) {
-    return level.split('_').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
-  }
-
-  String _formatEquipment(String equipment) {
-    return equipment.split('_').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
-  }
-
-  String _formatDietaryRestriction(String restriction) {
-    return restriction.split('_').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
-  }
 }
 
 class OnboardingPage {

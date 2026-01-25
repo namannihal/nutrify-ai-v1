@@ -1,6 +1,6 @@
 """User and profile schemas"""
 
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
@@ -47,12 +47,16 @@ class UserProfileBase(BaseModel):
     fitness_experience: Optional[str] = None
     dietary_restrictions: Optional[List[str]] = None
     allergies: Optional[str] = None
-    meals_per_day: Optional[int] = Field(None, ge=3, le=6)
+    meals_per_day: Optional[int] = Field(None, ge=1, le=10)
     cooking_time: Optional[str] = None
     workout_days_per_week: Optional[str] = None
     workout_duration: Optional[str] = None
     preferred_workout_time: Optional[str] = None
     equipment_access: Optional[List[str]] = None
+    # JSONB fields for detailed preferences
+    unit_preferences: Optional[Dict[str, Any]] = None
+    fitness_preferences: Optional[Dict[str, Any]] = None
+    nutrition_preferences: Optional[Dict[str, Any]] = None
 
 
 class UserProfileCreate(UserProfileBase):
@@ -75,7 +79,10 @@ class UserProfileResponse(UserProfileBase):
     id: UUID
     user_id: UUID
     onboarding_completed: bool
+    unit_preferences: Optional[Dict[str, Any]] = None
+    fitness_preferences: Optional[Dict[str, Any]] = None
+    nutrition_preferences: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = {"from_attributes": True}
