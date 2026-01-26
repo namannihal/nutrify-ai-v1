@@ -25,10 +25,9 @@ class WorkoutSession(Base):
         index=True
     )
 
-    # Optional reference to a planned workout
-    workout_id: Mapped[Optional[UUID]] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("workouts.id", ondelete="SET NULL"),
+    # Optional reference to a planned workout (string to support custom workouts)
+    workout_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
         nullable=True
     )
 
@@ -70,10 +69,9 @@ class ExerciseSet(Base):
         index=True
     )
 
-    # Optional reference to a planned exercise
-    exercise_id: Mapped[Optional[UUID]] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("exercises.id", ondelete="SET NULL"),
+    # Optional reference to a planned exercise (string to support custom exercises)
+    exercise_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
         nullable=True
     )
 

@@ -20,14 +20,14 @@ class ExerciseSetBase(BaseModel):
 
 class ExerciseSetCreate(ExerciseSetBase):
     """Create exercise set schema"""
-    exercise_id: Optional[UUID] = None
+    exercise_id: Optional[str] = None  # Changed from UUID to str for custom exercises
 
 
 class ExerciseSetResponse(ExerciseSetBase):
     """Exercise set response schema"""
     id: UUID
     session_id: UUID
-    exercise_id: Optional[UUID] = None
+    exercise_id: Optional[str] = None  # Changed from UUID to str for custom exercises
     is_pr: bool = False
     completed_at: datetime
 
@@ -42,14 +42,14 @@ class WorkoutSessionBase(BaseModel):
 
 class WorkoutSessionCreate(WorkoutSessionBase):
     """Create workout session schema"""
-    workout_id: Optional[UUID] = None
+    workout_id: Optional[str] = None  # Changed from UUID to str for custom workouts
 
 
 class WorkoutSessionResponse(WorkoutSessionBase):
     """Workout session response schema"""
     id: UUID
     user_id: UUID
-    workout_id: Optional[UUID] = None
+    workout_id: Optional[str] = None  # Changed from UUID to str for custom workouts
     started_at: datetime
     completed_at: Optional[datetime] = None
     status: str
@@ -110,13 +110,13 @@ class ExerciseHistory(BaseModel):
 
 class StartWorkoutRequest(BaseModel):
     """Request to start a new workout"""
-    workout_id: Optional[UUID] = None
+    workout_id: Optional[str] = None  # Changed from UUID to str for custom workouts
     workout_name: str
 
 
 class LogSetRequest(BaseModel):
     """Request to log a single set"""
-    exercise_id: Optional[UUID] = None
+    exercise_id: Optional[str] = None  # Changed from UUID to str for custom exercises
     exercise_name: str
     set_number: int = Field(..., ge=1)
     weight_kg: Decimal = Field(..., ge=0)

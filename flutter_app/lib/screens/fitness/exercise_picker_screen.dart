@@ -45,15 +45,15 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
   Widget build(BuildContext context) {
     final libraryState = ref.watch(exerciseLibraryProvider);
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
-    // Theme-aware colors
-    final backgroundColor = isDark ? Colors.grey[900] : Colors.grey[50];
-    final surfaceColor = isDark ? Colors.grey[850] : Colors.white;
-    final cardColor = isDark ? Colors.grey[800] : Colors.grey[100];
-    final textColor = isDark ? Colors.white : Colors.grey[900];
-    final subtitleColor = isDark ? Colors.grey[400] : Colors.grey[600];
-    final borderColor = isDark ? Colors.grey[700] : Colors.grey[300];
+    // Force light theme colors (always white background)
+    const backgroundColor = Color(0xFFFAFAFA); // Colors.grey[50]
+    const surfaceColor = Colors.white;
+    const cardColor = Color(0xFFF5F5F5); // Colors.grey[100]
+    const textColor = Color(0xFF212121); // Colors.grey[900]
+    const subtitleColor = Color(0xFF757575); // Colors.grey[600]
+    const borderColor = Color(0xFFE0E0E0); // Colors.grey[300]
+    const isDark = false; // Always use light theme styling
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -347,7 +347,7 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
             label,
             style: TextStyle(color: subtitleColor, fontSize: 13),
           ),
-          dropdownColor: isDark ? Colors.grey[800] : Colors.white,
+          dropdownColor: Colors.white, // Always use light theme
           style: TextStyle(color: textColor, fontSize: 13),
           items: [
             DropdownMenuItem<String?>(
@@ -476,9 +476,11 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
                   const SizedBox(height: 4),
                   Row(
                     children: [
+                      _buildTag(_getTypeLabel(exercise.exerciseType), cardColor, _getTypeColor(exercise.exerciseType)),
+                      const SizedBox(width: 6),
                       _buildTag(exercise.categoryDisplay, cardColor, subtitleColor),
                       const SizedBox(width: 6),
-                      _buildTag(exercise.equipmentDisplay, cardColor, subtitleColor),
+                      _buildTag(exercise.levelDisplay, cardColor, subtitleColor),
                     ],
                   ),
                 ],
@@ -585,13 +587,27 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
     }
   }
 
+  String _getTypeLabel(LibraryExerciseType type) {
+    switch (type) {
+      case LibraryExerciseType.weighted:
+        return 'Weighted';
+      case LibraryExerciseType.bodyweight:
+        return 'Bodyweight';
+      case LibraryExerciseType.duration:
+        return 'Timed';
+      case LibraryExerciseType.cardio:
+        return 'Cardio';
+    }
+  }
+
   void _showCreateCustomExerciseDialog(BuildContext context) {
     final theme = Theme.of(context);
     final nameController = TextEditingController();
-    ExerciseType selectedType = ExerciseType.weighted;
-    String selectedMuscle = 'chest';
+    LibraryExerciseType? selectedType = LibraryExerciseType.weighted;
+    String selectedMuscle = 'full body';
 
     final muscles = [
+      'full body',
       'chest', 'back', 'shoulders', 'biceps', 'triceps',
       'forearms', 'quadriceps', 'hamstrings', 'glutes', 'calves',
       'abdominals', 'obliques', 'lower back', 'traps', 'lats',
@@ -603,14 +619,12 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
-          final isDark = theme.brightness == Brightness.dark;
-
           return Container(
             padding: EdgeInsets.only(
               bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.grey[900] : Colors.white,
+            decoration: const BoxDecoration(
+              color: Colors.white, // Always use light theme
               borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: SafeArea(
@@ -658,7 +672,7 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
-                      children: ExerciseType.values.map((type) {
+                      children: LibraryExerciseType.values.map((type) {
                         final isSelected = selectedType == type;
                         return ChoiceChip(
                           label: Text(_getTypeLabel(type)),
@@ -699,14 +713,35 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
                       child: FilledButton.icon(
                         onPressed: () async {
                           if (nameController.text.trim().isNotEmpty) {
+                            // Determine category and equipment based on selectedType
+                            String category;
+                            String equipment;
+                            
+                            switch (selectedType!) {
+                              case LibraryExerciseType.cardio:
+                                category = 'cardio';
+                                equipment = 'other';
+                                break;
+                              case LibraryExerciseType.duration:
+                                category = 'stretching';
+                                equipment = 'body only';
+                                break;
+                              case LibraryExerciseType.bodyweight:
+                                category = 'strength';
+                                equipment = 'body only';
+                                break;
+                              case LibraryExerciseType.weighted:
+                                category = 'strength';
+                                equipment = 'other';
+                                break;
+                            }
+                            
                             final customExercise = LibraryExercise(
                               id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
                               name: nameController.text.trim(),
                               level: 'intermediate',
-                              equipment: selectedType == ExerciseType.bodyweight
-                                  ? 'body only'
-                                  : 'other',
-                              category: 'strength',
+                              equipment: equipment,
+                              category: category,
                               primaryMuscles: [selectedMuscle],
                             );
                             // Save to local database via provider
@@ -732,16 +767,5 @@ class _ExercisePickerScreenState extends ConsumerState<ExercisePickerScreen> {
     );
   }
 
-  String _getTypeLabel(ExerciseType type) {
-    switch (type) {
-      case ExerciseType.weighted:
-        return 'Weighted';
-      case ExerciseType.bodyweight:
-        return 'Bodyweight';
-      case ExerciseType.duration:
-        return 'Timed';
-      case ExerciseType.cardio:
-        return 'Cardio';
-    }
-  }
+
 }

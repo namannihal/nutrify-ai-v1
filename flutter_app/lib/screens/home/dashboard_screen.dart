@@ -11,6 +11,7 @@ import '../../widgets/dashboard/stats_card.dart';
 import '../../widgets/dashboard/quick_actions.dart';
 import '../../widgets/dashboard/recent_meals_card.dart';
 import '../../widgets/dashboard/workout_progress_card.dart';
+import '../../widgets/dashboard/water_intake_card.dart';
 import '../../widgets/streak_card.dart';
 import '../../providers/gamification_provider.dart';
 
@@ -135,6 +136,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               padding: const EdgeInsets.all(16),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
+                  // Streak Card - Top for motivation
+                  StreakCard(
+                    onTap: () => context.go('/achievements'),
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
                   // Quick Stats Row
                   Row(
                     children: [
@@ -148,19 +156,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           icon: Icons.local_fire_department,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: StatsCard(
-                          title: 'Water Intake',
-                          value: waterGlasses.toString(),
-                          target: '/ $waterTarget glasses',
-                          progress: waterGlasses / waterTarget,
-                          color: Theme.of(context).colorScheme.tertiary,
-                          icon: Icons.water_drop,
-                        ),
-                      ),
                     ],
                   ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Water Intake Card - Quick tracking
+                  const WaterIntakeCard(),
                   
                   const SizedBox(height: 16),
                   
@@ -194,13 +196,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   
                   // Quick Actions
                   const QuickActions(),
-
-                  const SizedBox(height: 24),
-
-                  // Streak Card
-                  StreakCard(
-                    onTap: () => context.go('/achievements'),
-                  ),
 
                   const SizedBox(height: 24),
 

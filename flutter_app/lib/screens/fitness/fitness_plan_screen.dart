@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/fitness_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/generation_provider.dart' show generationNotifierProvider, GenerationState, GenerationTaskState;
 import '../../models/fitness.dart';
 import '../../widgets/common/loading_overlay.dart';
@@ -100,6 +101,10 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
     final totalDuration = weeklyStats.totalDurationHours;
     final caloriesBurned = weeklyStats.totalCaloriesBurned;
 
+    final authState = ref.watch(authNotifierProvider);
+    final hasAssessment = authState.profile?.fitnessPreferences != null &&
+        (authState.profile!.fitnessPreferences!['questionnaire_completed'] == true);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Fitness Plan'),
@@ -117,6 +122,12 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
               // TODO: Show workout history
             },
           ),
+          if (hasAssessment)
+             IconButton(
+               icon: const Icon(Icons.refresh),
+               onPressed: fitnessState.isLoading ? null : () => _showRegenerateDialog(context, ref),
+               tooltip: 'Regenerate Plan',
+             ),
         ],
       ),
       body: LoadingOverlay(
@@ -234,48 +245,48 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Coming Soon Badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.blue.shade400,
-                                Colors.indigo.shade400,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text(
-                            'COMING SOON',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
                         Icon(
-                          Icons.fitness_center,
+                          hasAssessment ? Icons.fitness_center : Icons.assignment_late,
                           size: 80,
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.3),
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                         ),
                         const SizedBox(height: 24),
                         Text(
-                          'AI Workout Planning',
+                          hasAssessment ? 'No Workout Plan Yet' : 'Complete Assessment',
                           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Personalized workout plans powered by AI\nare coming very soon!',
+                          hasAssessment
+                              ? 'Generate a personalized workout plan based on your experience and equipment.'
+                              : 'To generate a personalized plan, we first need to understand your fitness profile.',
                           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                           textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          onPressed: hasAssessment
+                              ? () => _startGeneration(context, ref)
+                              : () => _showFitnessQuestionnaire(context),
+                          icon: Icon(hasAssessment ? Icons.auto_awesome : Icons.assignment),
+                          label: Text(hasAssessment ? 'Generate Plan with AI' : 'Start Assessment'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // Custom Workout Option - Always Available
+                        OutlinedButton.icon(
+                          onPressed: () => _showQuickStartDialog(context),
+                          icon: const Icon(Icons.play_arrow),
+                          label: const Text('Start Custom Workout'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
                         ),
                         const SizedBox(height: 24),
                         // Feature preview list
@@ -296,37 +307,6 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                               _buildFeaturePreviewItem(context, Icons.trending_up, 'Progressive overload planning'),
                             ],
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                        // Complete Fitness Profile CTA
-                        FilledButton.icon(
-                          onPressed: () => _showFitnessQuestionnaire(context),
-                          icon: const Icon(Icons.assignment),
-                          label: const Text('Complete Fitness Profile'),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Complete your profile to get personalized plans',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        // Quick Start Option
-                        Text(
-                          'Or start a custom workout now',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () => _showQuickStartDialog(context),
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('Quick Start Workout'),
                         ),
                       ],
                     ),
@@ -434,7 +414,32 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                           ),
                           textAlign: TextAlign.center,
                         ),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () => _showQuickStartDialog(context),
+                          icon: const Icon(Icons.play_arrow),
+                          label: const Text('Quick Start Workout'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                        ),
                       ],
+                    ),
+                  ),
+                ),
+              
+              // Quick Start button when there's a workout scheduled
+              if (currentPlan != null && selectedWorkout != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Center(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showQuickStartDialog(context),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Quick Start Different Workout'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      ),
                     ),
                   ),
                 ),
@@ -972,43 +977,65 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
   void _showQuickStartDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Quick Start Workout'),
-        content: const Text(
-          'Start a custom workout session where you can add exercises from our library and track your sets, reps, and weights.',
+      builder: (dialogContext) => Theme(
+        data: Theme.of(context).copyWith(
+          brightness: Brightness.light,
+          dialogBackgroundColor: Colors.white,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+        child: AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text('Quick Start Workout'),
+          content: const Text(
+            'Start a custom workout session where you can add exercises from our library and track your sets, reps, and weights.',
           ),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              // Create a placeholder workout for quick start
-              final quickWorkout = Workout(
-                id: 'quick_start_${DateTime.now().millisecondsSinceEpoch}',
-                name: 'Quick Workout',
-                description: 'Custom workout session',
-                durationMinutes: 60,
-                exercises: [], // Start with empty exercises, user can add from library
-              );
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ActiveWorkoutScreen(workout: quickWorkout),
-                ),
-              );
-            },
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Start'),
-          ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                // Create a placeholder workout for quick start
+                final quickWorkout = Workout(
+                  id: 'quick_start_${DateTime.now().millisecondsSinceEpoch}',
+                  name: 'Quick Workout',
+                  description: 'Custom workout session',
+                  durationMinutes: 60,
+                  exercises: [], // Start with empty exercises, user can add from library
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ActiveWorkoutScreen(workout: quickWorkout),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Start'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _showRegenerateDialog(BuildContext context, WidgetRef ref) {
+    // Guard: Ensure assessment is completed
+    final authState = ref.read(authNotifierProvider);
+    final hasAssessment = authState.profile?.fitnessPreferences != null &&
+        (authState.profile!.fitnessPreferences!['questionnaire_completed'] == true);
+    
+    if (!hasAssessment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete your fitness assessment first!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     showDialog(
@@ -1130,5 +1157,34 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
         ],
       ),
     );
+  }
+  Future<void> _startGeneration(BuildContext context, WidgetRef ref) async {
+    // Guard: Ensure assessment is completed before allowing generation
+    final authState = ref.read(authNotifierProvider);
+    final hasAssessment = authState.profile?.fitnessPreferences != null &&
+        (authState.profile!.fitnessPreferences!['questionnaire_completed'] == true);
+    
+    if (!hasAssessment) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please complete your fitness assessment first!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    
+    final success = await ref.read(generationNotifierProvider.notifier).startFitnessGeneration();
+    
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fitness plan generation started! This may take a few minutes.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 }

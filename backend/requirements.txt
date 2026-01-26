@@ -1,58 +1,6 @@
-# FastAPI & Server
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-
-# Database
-sqlalchemy>=2.0.23
-asyncpg>=0.29.0
-alembic>=1.13.0
-psycopg2-binary>=2.9.9
-greenlet>=3.0.0
-
-# Redis & Caching
-redis>=5.0.1
-hiredis>=2.2.3
-
-# Authentication & Security
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-multipart>=0.0.6
-google-auth>=2.25.0
-google-auth-oauthlib>=1.2.0
-
-# LangChain & AI
-langchain>=0.1.0
-langchain-openai>=0.1.0
-langchain-community>=0.0.13
-langsmith>=0.0.69
-openai>=1.6.0
-tiktoken>=0.5.2
-
-# Vector Store
-faiss-cpu>=1.7.4
-pgvector>=0.2.4
-
-# HTTP & External APIs
-httpx>=0.25.2
-aiohttp>=3.9.1
-
-# Background Tasks
-celery>=5.3.4
-flower>=2.0.1
-
-# Utilities
-python-dateutil>=2.8.2
-pytz>=2023.3
-email-validator>=2.1.0
-
-# Monitoring & Logging
-structlog>=24.1.0
-sentry-sdk[fastapi]>=1.39.0
-
-# Payment Processing
-stripe>=7.9.0
-
-# Environment Variables
-python-dotenv>=1.0.0
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
+google-generativeai>=0.4.0
+python-dotenv>=1.0.1

@@ -41,6 +41,8 @@ UserProfile _$UserProfileFromJson(Map<String, dynamic> json) => UserProfile(
   onboardingCompleted: json['onboarding_completed'] as bool?,
   createdAt: json['created_at'] as String?,
   updatedAt: json['updated_at'] as String?,
+  nutritionPreferences: json['nutrition_preferences'] as Map<String, dynamic>?,
+  fitnessPreferences: json['fitness_preferences'] as Map<String, dynamic>?,
 );
 
 Map<String, dynamic> _$UserProfileToJson(UserProfile instance) =>
@@ -59,6 +61,8 @@ Map<String, dynamic> _$UserProfileToJson(UserProfile instance) =>
       'onboarding_completed': instance.onboardingCompleted,
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
+      'nutrition_preferences': instance.nutritionPreferences,
+      'fitness_preferences': instance.fitnessPreferences,
     };
 
 AuthResponse _$AuthResponseFromJson(Map<String, dynamic> json) => AuthResponse(

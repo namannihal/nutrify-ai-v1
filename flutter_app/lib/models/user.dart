@@ -77,7 +77,15 @@ class UserProfile {
     this.onboardingCompleted,
     this.createdAt,
     this.updatedAt,
+    this.nutritionPreferences,
+    this.fitnessPreferences,
   });
+
+  @JsonKey(name: 'nutrition_preferences')
+  final Map<String, dynamic>? nutritionPreferences;
+
+  @JsonKey(name: 'fitness_preferences')
+  final Map<String, dynamic>? fitnessPreferences; // Added field
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => _$UserProfileFromJson(json);
   Map<String, dynamic> toJson() => _$UserProfileToJson(this);

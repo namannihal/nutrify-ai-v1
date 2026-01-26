@@ -5,6 +5,9 @@ import '../../models/fitness.dart';
 import '../../models/workout_session.dart';
 import '../../models/exercise_library.dart';
 import '../../providers/workout_session_provider.dart';
+import '../../providers/exercise_library_provider.dart';
+import '../../providers/gamification_provider.dart';
+import '../../providers/fitness_provider.dart';
 import 'workout_summary_screen.dart';
 import 'exercise_picker_screen.dart';
 
@@ -78,7 +81,11 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
     final sessionState = ref.watch(workoutSessionProvider);
     final notifier = ref.read(workoutSessionProvider.notifier);
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    
+    // Force light theme
+    const isDark = false;
+    const backgroundColor = Color(0xFFF5F5F5); // Colors.grey[100]
+    const surfaceColor = Colors.white;
 
     return PopScope(
       canPop: !sessionState.hasActiveSession,
@@ -91,9 +98,9 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: isDark ? Colors.black : Colors.grey[100],
+        backgroundColor: backgroundColor,
         appBar: AppBar(
-          backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+          backgroundColor: surfaceColor,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.close),
@@ -185,7 +192,6 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
 
   Widget _buildRestTimerSetting(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final minutes = _defaultRestSeconds ~/ 60;
     final seconds = _defaultRestSeconds % 60;
     final displayTime = seconds == 0
@@ -198,7 +204,7 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -209,22 +215,33 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
             size: 20,
           ),
           const SizedBox(width: 12),
-          Text(
+          const Text(
             'Rest Timer',
             style: TextStyle(
               fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : Colors.black87,
+              color: Colors.black87,
             ),
           ),
-          const Spacer(),
-          // Timer presets
-          _buildTimerPreset(context, '1m', 60),
-          const SizedBox(width: 8),
-          _buildTimerPreset(context, '1.5m', 90),
-          const SizedBox(width: 8),
-          _buildTimerPreset(context, '2m', 120),
-          const SizedBox(width: 8),
-          _buildTimerPreset(context, '3m', 180),
+          const SizedBox(width: 12),
+          // Timer presets - make scrollable to prevent overflow
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildTimerPreset(context, '30s', 30),
+                  const SizedBox(width: 8),
+                  _buildTimerPreset(context, '1m', 60),
+                  const SizedBox(width: 8),
+                  _buildTimerPreset(context, '1.5m', 90),
+                  const SizedBox(width: 8),
+                  _buildTimerPreset(context, '2m', 120),
+                  const SizedBox(width: 8),
+                  _buildTimerPreset(context, '3m', 180),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -292,9 +309,9 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
                 ),
                 Row(
                   children: [
-                    _buildTimerButton('-30s', () => notifier.addRestTime(-30)),
+                    _buildTimerButton('-10s', () => notifier.addRestTime(-10)),
                     const SizedBox(width: 8),
-                    _buildTimerButton('+30s', () => notifier.addRestTime(30)),
+                    _buildTimerButton('+10s', () => notifier.addRestTime(10)),
                   ],
                 ),
               ],
@@ -370,7 +387,6 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
     int exerciseIndex,
   ) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final isExpanded = _expandedExerciseIndex == exerciseIndex;
     final completedSets = exercise.completedSets.length;
     final isComplete = exercise.isComplete;
@@ -378,7 +394,7 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -395,24 +411,23 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  // Completion indicator
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: isComplete
-                          ? Colors.green
-                          : theme.colorScheme.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(16),
+                  // Completion indicator (only show checkmark when complete)
+                  if (isComplete)
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.green,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(
+                        Icons.check,
+                        size: 18,
+                        color: Colors.white,
+                      ),
                     ),
-                    child: Icon(
-                      isComplete ? Icons.check : Icons.fitness_center,
-                      size: 18,
-                      color: isComplete ? Colors.white : theme.colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Exercise name and progress
+                  if (isComplete) const SizedBox(width: 12),
+                  // Exercise name and number
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,14 +441,29 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          _getExerciseSubtitle(exercise),
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontSize: 13,
+                          '${exercise.completedSets.where((s) => !s.isWarmup).length}/${exercise.targetSets} sets${exercise.targetReps != null ? ' • ${exercise.targetReps} reps' : ''}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
                           ),
                         ),
                       ],
                     ),
+                  ),
+                  // Info button for non-custom exercises
+                  if (!exercise.exerciseId.startsWith('custom_'))
+                    IconButton(
+                      icon: const Icon(Icons.info_outline, size: 20),
+                      onPressed: () => _showExerciseInstructions(exercise.exerciseId, exercise.name),
+                      tooltip: 'View instructions',
+                      padding: const EdgeInsets.all(8),
+                    ),
+                  // Delete exercise button
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 22),
+                    onPressed: () => _deleteExercise(exerciseIndex, exercise.name),
+                    tooltip: 'Delete exercise',
+                    padding: const EdgeInsets.all(8),
                   ),
                   // Sets progress
                   Container(
@@ -583,7 +613,16 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
           if (exercise.exerciseType == ExerciseType.duration)
             Expanded(child: Center(child: Text('TIME', style: headerStyle)))
           else
-            Expanded(child: Center(child: Text('REPS', style: headerStyle))),
+            Expanded(
+              child: Center(
+                child: Text(
+                  exercise.exerciseType == ExerciseType.duration || exercise.exerciseType == ExerciseType.cardio
+                      ? 'DURATION'
+                      : 'REPS',
+                  style: headerStyle,
+                ),
+              ),
+            ),
           const SizedBox(width: 48),
         ],
       ),
@@ -692,36 +731,26 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
                   ),
                 ),
               ),
-            // Reps or Duration
             Expanded(
               child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (set.isPR)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Icon(
+                          Icons.star,
+                          size: 16,
+                          color: Colors.amber,
+                        ),
+                      ),
                     Text(
-                      exercise.exerciseType == ExerciseType.duration
-                          ? '${set.durationSeconds ?? 0}s'
+                      exercise.exerciseType == ExerciseType.duration || exercise.exerciseType == ExerciseType.cardio
+                          ? _formatDuration(set.durationSeconds ?? 0)
                           : '${set.reps}',
                       style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
                     ),
-                    if (set.isPR) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.amber,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'PR',
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -929,9 +958,9 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
       exerciseId: exercise.id,
       name: exercise.name,
       exerciseType: type,
-      targetSets: 3,
-      targetReps: type == ExerciseType.duration ? null : 10,
-      targetDurationSeconds: type == ExerciseType.duration ? 30 : null,
+      targetSets: 1, // Changed from 3 to 1
+      targetReps: type == ExerciseType.duration || type == ExerciseType.cardio ? null : 10,
+      targetDurationSeconds: type == ExerciseType.duration || type == ExerciseType.cardio ? 300 : null, // 5 minutes default
       restSeconds: 90,
     );
 
@@ -1045,12 +1074,135 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
     final summary = await ref.read(workoutSessionProvider.notifier).finishWorkout();
 
     if (summary != null && mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => WorkoutSummaryScreen(summary: summary),
+      // Refresh streak and stats after workout completion
+      try {
+        // Invalidate the streak provider to force refresh on dashboard
+        ref.invalidate(streakProvider);
+        
+        await Future.wait<void>([
+          ref.read(gamificationProvider.notifier).loadStreak(),
+          ref.read(fitnessNotifierProvider.notifier).loadWeeklyStats(forceRefresh: true),
+        ]);
+      } catch (e) {
+        // Log but don't block navigation
+        debugPrint('Failed to refresh streak/stats: $e');
+      }
+      
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WorkoutSummaryScreen(summary: summary),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Show exercise instructions in a dialog
+  Future<void> _showExerciseInstructions(String exerciseId, String exerciseName) async {
+    // Get the exercise from library
+    final libraryState = ref.read(exerciseLibraryProvider);
+    final exercise = libraryState.allExercises.firstWhere(
+      (e) => e.id == exerciseId,
+      orElse: () => LibraryExercise(
+        id: '',
+        name: '',
+        level: '',
+        equipment: '',
+        category: '',
+        primaryMuscles: [],
+      ),
+    );
+
+    if (exercise.id.isEmpty || exercise.instructions == null || exercise.instructions!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No instructions available for this exercise')),
+      );
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(exerciseName),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Instructions:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              ...List.generate(
+                exercise.instructions!.length,
+                (index) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${index + 1}. ',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Expanded(
+                        child: Text(exercise.instructions![index]),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Delete an exercise with confirmation
+  Future<void> _deleteExercise(int exerciseIndex, String exerciseName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Exercise?'),
+        content: Text('Remove "$exerciseName" and all its sets from this workout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      ref.read(workoutSessionProvider.notifier).removeExercise(exerciseIndex);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed $exerciseName'),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
+  }
+
+  /// Format duration in seconds to mm:ss format
+  String _formatDuration(int seconds) {
+    final minutes = seconds ~/ 60;
+    final secs = seconds % 60;
+    return '$minutes:${secs.toString().padLeft(2, '0')}';
   }
 }

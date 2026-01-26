@@ -27,6 +27,7 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
   bool _isLoading = false;
   int _moodScore = 5;
   int _energyScore = 5;
+  bool _useCm = true; // true for cm, false for inches
 
   @override
   void dispose() {
@@ -99,19 +100,23 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
     });
 
     try {
-      // Build measurements map
+      // Build measurements map (always store in cm)
       final measurements = <String, dynamic>{};
       if (_waistController.text.isNotEmpty) {
-        measurements['waist_cm'] = double.tryParse(_waistController.text);
+        final value = double.tryParse(_waistController.text);
+        measurements['waist_cm'] = _useCm ? value : (value! * 2.54); // Convert inches to cm
       }
       if (_chestController.text.isNotEmpty) {
-        measurements['chest_cm'] = double.tryParse(_chestController.text);
+        final value = double.tryParse(_chestController.text);
+        measurements['chest_cm'] = _useCm ? value : (value! * 2.54);
       }
       if (_hipsController.text.isNotEmpty) {
-        measurements['hips_cm'] = double.tryParse(_hipsController.text);
+        final value = double.tryParse(_hipsController.text);
+        measurements['hips_cm'] = _useCm ? value : (value! * 2.54);
       }
       if (_armsController.text.isNotEmpty) {
-        measurements['arms_cm'] = double.tryParse(_armsController.text);
+        final value = double.tryParse(_armsController.text);
+        measurements['arms_cm'] = _useCm ? value : (value! * 2.54);
       }
 
       final entry = ProgressEntryCreate(
@@ -285,14 +290,47 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
+                      // Unit Toggle
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Unit:',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(width: 8),
+                          SegmentedButton<bool>(
+                            segments: const [
+                              ButtonSegment(
+                                value: true,
+                                label: Text('cm'),
+                              ),
+                              ButtonSegment(
+                                value: false,
+                                label: Text('in'),
+                              ),
+                            ],
+                            selected: {_useCm},
+                            onSelectionChanged: (Set<bool> newSelection) {
+                              setState(() {
+                                _useCm = newSelection.first;
+                              });
+                            },
+                            style: ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
                       Row(
                         children: [
                           Expanded(
                             child: TextFormField(
                               controller: _waistController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Waist',
-                                suffixText: 'cm',
+                                suffixText: _useCm ? 'cm' : 'in',
                                 border: OutlineInputBorder(),
                               ),
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -302,9 +340,9 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
                           Expanded(
                             child: TextFormField(
                               controller: _chestController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Chest',
-                                suffixText: 'cm',
+                                suffixText: _useCm ? 'cm' : 'in',
                                 border: OutlineInputBorder(),
                               ),
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -318,9 +356,9 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
                           Expanded(
                             child: TextFormField(
                               controller: _hipsController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Hips',
-                                suffixText: 'cm',
+                                suffixText: _useCm ? 'cm' : 'in',
                                 border: OutlineInputBorder(),
                               ),
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -330,9 +368,9 @@ class _AddProgressScreenState extends ConsumerState<AddProgressScreen> {
                           Expanded(
                             child: TextFormField(
                               controller: _armsController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Arms',
-                                suffixText: 'cm',
+                                suffixText: _useCm ? 'cm' : 'in',
                                 border: OutlineInputBorder(),
                               ),
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),

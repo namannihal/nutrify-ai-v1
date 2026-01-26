@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../models/workout_session.dart';
 import '../models/fitness.dart';
 import '../services/api_service.dart';
@@ -151,13 +153,151 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
   Timer? _restTimer;
   Timer? _elapsedTimer;
 
-  WorkoutSessionNotifier(this._apiService) : super(const WorkoutSessionState());
+  WorkoutSessionNotifier(this._apiService) : super(const WorkoutSessionState()) {
+    // Attempt to restore saved session on init
+    _attemptSessionRestore();
+  }
 
   @override
   void dispose() {
     _restTimer?.cancel();
     _elapsedTimer?.cancel();
     super.dispose();
+  }
+
+  /// Attempt to restore a saved session from local storage
+  Future<void> _attemptSessionRestore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionData = prefs.getString('saved_workout_session');
+      
+      if (sessionData != null) {
+        final Map<String, dynamic> data = json.decode(sessionData);
+        final savedTimestamp = data['savedAt'] as int?;
+        
+        if (savedTimestamp != null) {
+          final age = DateTime.now().millisecondsSinceEpoch - savedTimestamp;
+          const twentyFourHours = 24 * 60 * 60 * 1000;
+          
+          // Only restore if less than 24 hours old
+          if (age < twentyFourHours) {
+            await restoreSession(data);
+            _logger.d('Restored workout session from ${(age / 1000 / 60).toStringAsFixed(0)} minutes ago');
+            return;
+          } else {
+            // Session too old, clear it
+            await prefs.remove('saved_workout_session');
+            _logger.d('Cleared old workout session (age: ${(age / 1000 / 60 / 60).toStringAsFixed(1)} hours)');
+          }
+        }
+      }
+    } catch (e) {
+      _logger.w('Failed to restore session: $e');
+      // Clear corrupted data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('saved_workout_session');
+    }
+  }
+
+  /// Save current session to local storage
+  Future<void> _saveSession() async {
+    if (state.activeSession == null) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionData = {
+        'savedAt': DateTime.now().millisecondsSinceEpoch,
+        'sessionId': state.activeSession!.id,
+        'workoutName': state.activeSession!.workoutName,
+        'elapsedSeconds': state.elapsedSeconds,
+        'exercises': state.exercises.map((e) => {
+          'exerciseId': e.exerciseId,
+          'name': e.name,
+          'targetSets': e.targetSets,
+          'targetReps': e.targetReps,
+          'restSeconds': e.restSeconds,
+          'exerciseType': e.exerciseType.name,
+          'completedSets': e.completedSets.map((s) => {
+            'setNumber': s.setNumber,
+            'weightKg': s.weightKg,
+            'reps': s.reps,
+            'isWarmup': s.isWarmup,
+          }).toList(),
+        }).toList(),
+      };
+      
+      await prefs.setString('saved_workout_session', json.encode(sessionData));
+    } catch (e) {
+      _logger.w('Failed to save session: $e');
+    }
+  }
+
+  /// Restore session from saved data
+  Future<void> restoreSession(Map<String, dynamic> data) async {
+    try {
+      final sessionId = data['sessionId'] as String;
+      final workoutName = data['workoutName'] as String;
+      final elapsedSeconds = data['elapsedSeconds'] as int? ?? 0;
+      final exercisesData = data['exercises'] as List? ?? [];
+      
+      // Recreate session object
+      final session = WorkoutSession(
+        id: sessionId,
+        userId: '', // Will be set by backend
+        workoutName: workoutName,
+        startedAt: DateTime.now().subtract(Duration(seconds: elapsedSeconds)),
+        status: 'active',
+        totalVolume: 0,
+        durationSeconds: elapsedSeconds,
+        sets: [],
+      );
+      
+      // Recreate exercises
+      final exercises = exercisesData.map((e) {
+        final completedSetsData = e['completedSets'] as List? ?? [];
+        final completedSets = completedSetsData.map((s) => CompletedSetLocal(
+          setNumber: s['setNumber'] as int,
+          weightKg: (s['weightKg'] as num).toDouble(),
+          reps: s['reps'] as int,
+          isWarmup: s['isWarmup'] as bool? ?? false,
+          isPR: false,
+        )).toList();
+        
+        return ActiveExerciseProgress(
+          exerciseId: e['exerciseId'] as String,
+          name: e['name'] as String,
+          targetSets: e['targetSets'] as int,
+          targetReps: e['targetReps'] as int?,
+          restSeconds: e['restSeconds'] as int?,
+          exerciseType: ExerciseType.values.firstWhere(
+            (t) => t.name == e['exerciseType'],
+            orElse: () => ExerciseType.weighted,
+          ),
+          completedSets: completedSets,
+        );
+      }).toList();
+      
+      state = state.copyWith(
+        activeSession: session,
+        exercises: exercises,
+        elapsedSeconds: elapsedSeconds,
+      );
+      
+      _startElapsedTimer();
+    } catch (e) {
+      _logger.e('Failed to restore session from data: $e');
+      throw e;
+    }
+  }
+
+  /// Clear saved session from local storage
+  Future<void> _clearSavedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('saved_workout_session');
+    } catch (e) {
+      _logger.w('Failed to clear saved session: $e');
+    }
   }
 
   /// Start a new workout session
@@ -200,6 +340,9 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
 
       // Start elapsed timer
       _startElapsedTimer();
+
+      // Save session to local storage
+      await _saveSession();
 
       // Load exercise history in background (non-blocking)
       _loadExerciseHistoryInBackground(exercises);
@@ -329,6 +472,9 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
         pendingSets: [...state.pendingSets, pendingSet],
       );
 
+      // Save session after logging set
+      _saveSession();
+
       // Start rest timer if not a warmup
       if (!isWarmup) {
         startRestTimer(restSeconds);
@@ -349,6 +495,34 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
     state = state.copyWith(
       exercises: [...state.exercises, exercise],
     );
+    
+    // Save session after adding exercise
+    _saveSession();
+  }
+
+  /// Remove an exercise from the current workout
+  void removeExercise(int exerciseIndex) {
+    if (state.activeSession == null) return;
+    if (exerciseIndex >= state.exercises.length) return;
+
+    final exercise = state.exercises[exerciseIndex];
+    final updatedExercises = List<ActiveExerciseProgress>.from(state.exercises);
+    updatedExercises.removeAt(exerciseIndex);
+
+    // Remove all pending sets for this exercise
+    final updatedPendingSets = state.pendingSets.where((pending) {
+      return pending.exerciseId != exercise.exerciseId;
+    }).toList();
+
+    state = state.copyWith(
+      exercises: updatedExercises,
+      pendingSets: updatedPendingSets,
+    );
+
+    // Save session after removing exercise
+    _saveSession();
+
+    _logger.d('Removed exercise: ${exercise.name}');
   }
 
   /// Delete a completed set from an exercise
@@ -371,10 +545,11 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
       return entry.value.copyWith(setNumber: entry.key + 1);
     }).toList();
 
-    // Update exercise
+    // Update exercise - decrease targetSets to prevent showing extra input rows
     final updatedExercises = List<ActiveExerciseProgress>.from(state.exercises);
     updatedExercises[exerciseIndex] = exercise.copyWith(
       completedSets: renumberedSets,
+      targetSets: exercise.targetSets - 1, // Fix: Decrease target count
     );
 
     // Remove from pending sets if it hasn't been synced yet
@@ -388,7 +563,10 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
       pendingSets: updatedPendingSets,
     );
 
-    _logger.d('Deleted set ${setIndex + 1} from ${exercise.name}');
+    // Save session after deleting set
+    _saveSession();
+
+    _logger.d('Deleted set ${setIndex + 1} from ${exercise.name}, new target: ${exercise.targetSets - 1}');
   }
 
   /// Start the rest timer
@@ -500,6 +678,9 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
       _restTimer?.cancel();
       _elapsedTimer?.cancel();
 
+      // Clear saved session
+      await _clearSavedSession();
+
       state = const WorkoutSessionState(); // Reset state
 
       return summary;
@@ -523,6 +704,9 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
 
       _restTimer?.cancel();
       _elapsedTimer?.cancel();
+
+      // Clear saved session
+      await _clearSavedSession();
 
       state = const WorkoutSessionState(); // Reset state
 

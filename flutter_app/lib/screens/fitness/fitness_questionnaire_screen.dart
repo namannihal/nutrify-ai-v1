@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/generation_provider.dart';
 
 /// Fitness questionnaire shown before generating AI workout plans
 /// Collects detailed fitness preferences that weren't part of onboarding
@@ -126,9 +127,12 @@ class _FitnessQuestionnaireScreenState
       });
 
       if (success && mounted) {
+        // Auto-trigger generation
+        ref.read(generationNotifierProvider.notifier).startFitnessGeneration();
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Fitness preferences saved!'),
+            content: Text('Preferences saved! Generating your plan...'),
             behavior: SnackBarBehavior.floating,
           ),
         );

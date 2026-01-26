@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/generation_provider.dart';
 
 /// Nutrition questionnaire shown before generating AI meal plans
 /// Collects detailed nutrition preferences that weren't part of onboarding
@@ -29,7 +30,7 @@ class _NutritionQuestionnaireScreenState
   List<String> _allergies = [];
   List<String> _intolerances = [];
   List<String> _medicalConditions = [];
-  List<String> _foodDislikes = [];
+  List<String> _foodLikes = [];
   List<String> _supplements = [];
   String? _eatingStyle;
 
@@ -62,6 +63,19 @@ class _NutritionQuestionnaireScreenState
     'French',
   ];
 
+  final List<String> _commonLikes = [
+    'Chicken',
+    'Fish',
+    'Beef',
+    'Pork',
+    'Eggs',
+    'Dairy',
+    'Vegetables',
+    'Fruits',
+    'Grains',
+    'Nuts',
+    'I like everything',
+  ];
   final List<String> _allergyOptions = [
     'Peanuts',
     'Tree Nuts',
@@ -93,21 +107,6 @@ class _NutritionQuestionnaireScreenState
     'Celiac Disease',
     'Kidney Disease',
     'Heart Disease',
-    'None',
-  ];
-
-  final List<String> _commonDislikes = [
-    'Spicy Food',
-    'Seafood',
-    'Organ Meats',
-    'Raw Fish',
-    'Mushrooms',
-    'Onions',
-    'Tomatoes',
-    'Broccoli',
-    'Brussels Sprouts',
-    'Tofu',
-    'Eggs',
     'None',
   ];
 
@@ -158,7 +157,7 @@ class _NutritionQuestionnaireScreenState
         'intolerances': _intolerances.contains('None') ? [] : _intolerances,
         'medical_conditions':
             _medicalConditions.contains('None') ? [] : _medicalConditions,
-        'food_dislikes': _foodDislikes.contains('None') ? [] : _foodDislikes,
+        'food_likes': _foodLikes.contains('I like everything') ? [] : _foodLikes,
         'supplements': _supplements.contains('None') ? [] : _supplements,
         'eating_style': _eatingStyle,
         'questionnaire_completed': true,
@@ -171,9 +170,12 @@ class _NutritionQuestionnaireScreenState
       });
 
       if (success && mounted) {
+        // Auto-trigger generation
+        ref.read(generationNotifierProvider.notifier).startNutritionGeneration();
+        
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Nutrition preferences saved!'),
+            content: Text('Preferences saved! Generating your plan...'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -637,16 +639,16 @@ class _NutritionQuestionnaireScreenState
           ),
           const SizedBox(height: 32),
 
-          // Food dislikes
+          // Food likes
           Text(
-            'Foods you dislike',
+            'Foods you like',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w500,
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            'We\'ll minimize these in your plan',
+            'Select foods you enjoy (helps personalize meal plans)',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -655,21 +657,21 @@ class _NutritionQuestionnaireScreenState
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _commonDislikes.map((food) {
-              final isSelected = _foodDislikes.contains(food);
-              return FilterChip(
+            children: _commonLikes.map((food) {
+              final isSelected = _foodLikes.contains(food);
+              return ChoiceChip(
                 label: Text(food),
                 selected: isSelected,
                 onSelected: (selected) {
                   setState(() {
-                    if (food == 'None') {
-                      _foodDislikes = selected ? ['None'] : [];
+                    if (food == 'I like everything') {
+                      _foodLikes = selected ? ['I like everything'] : [];
                     } else {
-                      _foodDislikes.remove('None');
+                      _foodLikes.remove('I like everything');
                       if (selected) {
-                        _foodDislikes.add(food);
+                        _foodLikes.add(food);
                       } else {
-                        _foodDislikes.remove(food);
+                        _foodLikes.remove(food);
                       }
                     }
                   });

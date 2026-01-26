@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../models/fitness.dart';
 import '../services/api_service.dart';
 import '../services/local_database.dart';
@@ -204,6 +206,13 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
         completionPercentage: completionPercentage,
         notes: notes,
       );
+      
+      // Invalidate weekly stats cache since we logged a new workout
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('weekly_stats_cache');
+      await prefs.remove('weekly_stats_cache_time');
+      _logger.d('Invalidated weekly stats cache after logging workout');
+      
       return true;
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -220,8 +229,36 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
     }
   }
 
-  Future<void> loadWeeklyStats() async {
+  Future<void> loadWeeklyStats({bool forceRefresh = false}) async {
     try {
+      // Try to load from cache first (only if not force refresh)
+      if (!forceRefresh) {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedData = prefs.getString('weekly_stats_cache');
+        final cacheTimestamp = prefs.getInt('weekly_stats_cache_time');
+        
+        if (cachedData != null && cacheTimestamp != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cacheTimestamp;
+          const fiveMinutes = 5 * 60 * 1000; // 5 minutes in milliseconds
+          
+          // Use cache if less than 5 minutes old
+          if (cacheAge < fiveMinutes) {
+            final Map<String, dynamic> cached = json.decode(cachedData);
+            state = state.copyWith(
+              weeklyStats: WeeklyWorkoutStats(
+                completedWorkouts: cached['completedWorkouts'] ?? 0,
+                totalDurationHours: (cached['totalDurationHours'] as num?)?.toDouble() ?? 0.0,
+                totalCaloriesBurned: cached['totalCaloriesBurned'] ?? 0,
+              ),
+              workoutLogs: (cached['workoutLogs'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+            );
+            _logger.d('Loaded weekly stats from cache (age: ${(cacheAge / 1000).toStringAsFixed(0)}s)');
+            return;
+          }
+        }
+      }
+
+      // Fetch fresh data from API
       final logs = await _apiService.getWorkoutLogs(days: 7);
 
       // Calculate stats from logs
@@ -237,14 +274,27 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
         totalCalories += (log['calories_burned'] as num?)?.toInt() ?? 0;
       }
 
+      final weeklyStats = WeeklyWorkoutStats(
+        completedWorkouts: completedWorkouts,
+        totalDurationHours: totalDurationMinutes / 60,
+        totalCaloriesBurned: totalCalories,
+      );
+
       state = state.copyWith(
-        weeklyStats: WeeklyWorkoutStats(
-          completedWorkouts: completedWorkouts,
-          totalDurationHours: totalDurationMinutes / 60,
-          totalCaloriesBurned: totalCalories,
-        ),
+        weeklyStats: weeklyStats,
         workoutLogs: logs,
       );
+
+      // Cache the data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('weekly_stats_cache', json.encode({
+        'completedWorkouts': completedWorkouts,
+        'totalDurationHours': totalDurationMinutes / 60,
+        'totalCaloriesBurned': totalCalories,
+        'workoutLogs': logs,
+      }));
+      await prefs.setInt('weekly_stats_cache_time', DateTime.now().millisecondsSinceEpoch);
+      _logger.d('Cached weekly stats');
     } catch (e) {
       // Don't show error for stats - just use defaults
       state = state.copyWith(

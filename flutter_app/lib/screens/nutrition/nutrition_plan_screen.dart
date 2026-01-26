@@ -143,6 +143,10 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
       selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.fatGrams)
     ).toInt() : 0;
 
+    final authState = ref.watch(authNotifierProvider);
+    final hasAssessment = authState.profile?.nutritionPreferences != null &&
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nutrition Plan'),
@@ -150,17 +154,29 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
           IconButton(
             icon: const Icon(Icons.camera_alt),
             onPressed: () {
-              context.push('/food-scanner');
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.white),
+                      SizedBox(width: 12),
+                      Text('Food Scanner - Coming Soon!'),
+                    ],
+                  ),
+                  backgroundColor: Colors.blue,
+                  duration: Duration(seconds: 2),
+                ),
+              );
             },
-            tooltip: 'Scan Food',
+            tooltip: 'Scan Food (Coming Soon)',
           ),
-          // Regenerate button hidden - AI generation coming soon
-          // if (currentPlan != null)
-          //   IconButton(
-          //     icon: const Icon(Icons.refresh),
-          //     onPressed: nutritionState.isLoading ? null : () => _showRegenerateDialog(context, ref),
-          //     tooltip: 'Regenerate Plan',
-          //   ),
+          // Regenerate button
+          if (hasAssessment)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: nutritionState.isLoading ? null : () => _showRegenerateDialog(context, ref),
+              tooltip: 'Regenerate Plan',
+            ),
         ],
       ),
       body: LoadingOverlay(
@@ -250,8 +266,6 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                 ),
               ),
               
-              const SizedBox(height: 16),
-              
               if (currentPlan == null)
                 Center(
                   child: Padding(
@@ -259,84 +273,37 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Coming Soon Badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.orange.shade400,
-                                Colors.deepOrange.shade400,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text(
-                            'COMING SOON',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
                         Icon(
-                          Icons.restaurant_menu,
+                          hasAssessment ? Icons.restaurant_menu : Icons.assignment_late,
                           size: 80,
                           color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                         ),
                         const SizedBox(height: 24),
                         Text(
-                          'AI Meal Planning',
+                          hasAssessment ? 'No Nutrition Plan Yet' : 'Complete Assessment',
                           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Personalized meal plans powered by AI\nare coming very soon!',
+                          hasAssessment
+                              ? 'Generate a personalized meal plan based on your goals and preferences.'
+                              : 'To generate a personalized plan, we first need to understand your preferences.',
                           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
-                        // Feature preview list
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            children: [
-                              _buildFeaturePreviewItem(context, Icons.auto_awesome, 'AI-generated personalized meals'),
-                              const SizedBox(height: 12),
-                              _buildFeaturePreviewItem(context, Icons.calculate, 'Automatic macro calculations'),
-                              const SizedBox(height: 12),
-                              _buildFeaturePreviewItem(context, Icons.restaurant, 'Based on your dietary preferences'),
-                              const SizedBox(height: 12),
-                              _buildFeaturePreviewItem(context, Icons.calendar_month, 'Weekly meal planning'),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        // Complete Nutrition Profile CTA
                         FilledButton.icon(
-                          onPressed: () => _showNutritionQuestionnaire(context),
-                          icon: const Icon(Icons.assignment),
-                          label: const Text('Complete Nutrition Profile'),
+                          onPressed: hasAssessment
+                              ? () => _startGeneration(context, ref)
+                              : () => _showNutritionQuestionnaire(context),
+                          icon: Icon(hasAssessment ? Icons.auto_awesome : Icons.assignment),
+                          label: Text(hasAssessment ? 'Generate Plan with AI' : 'Start Assessment'),
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Complete your profile to get personalized meal plans',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.outline,
                           ),
                         ),
                       ],
@@ -402,7 +369,8 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                   ],
                 ),
               ),
-            ),
+              ),
+
           ],
         ),
       ),
@@ -858,6 +826,21 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
   }
 
   void _showRegenerateDialog(BuildContext context, WidgetRef ref) {
+    // Guard: Ensure assessment is completed
+    final authState = ref.read(authNotifierProvider);
+    final hasAssessment = authState.profile?.nutritionPreferences != null &&
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
+    
+    if (!hasAssessment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete your nutrition assessment first!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     showDialog(
@@ -931,7 +914,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
             width: 24,
             height: 24,
             child: CircularProgressIndicator(
-              value: progress > 0 ? progress / 100 : null,
+              value: progress > 0 ? (progress / 100).clamp(0.0, 1.0) : null,
               strokeWidth: 3,
               valueColor: AlwaysStoppedAnimation<Color>(
                 Theme.of(context).colorScheme.primary,
@@ -971,5 +954,34 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
         ],
       ),
     );
+  }
+  Future<void> _startGeneration(BuildContext context, WidgetRef ref) async {
+    // Guard: Ensure assessment is completed before allowing generation
+    final authState = ref.read(authNotifierProvider);
+    final hasAssessment = authState.profile?.nutritionPreferences != null &&
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
+    
+    if (!hasAssessment) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please complete your nutrition assessment first!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    
+    final success = await ref.read(generationNotifierProvider.notifier).startNutritionGeneration();
+    
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nutrition plan generation started! This may take a few minutes.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 }

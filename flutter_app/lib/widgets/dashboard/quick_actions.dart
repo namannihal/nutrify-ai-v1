@@ -58,7 +58,21 @@ class QuickActions extends StatelessWidget {
                 subtitle: 'Get instant help',
                 icon: Icons.smart_toy,
                 color: Colors.orange,
-                onTap: () => context.go('/ai-chat'),
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(Icons.psychology, color: Colors.white),
+                          SizedBox(width: 12),
+                          Text('AI Coach - Coming Soon!'),
+                        ],
+                      ),
+                      backgroundColor: Colors.deepPurple,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
               ),
             ),
           ],
