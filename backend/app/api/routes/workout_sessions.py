@@ -26,6 +26,8 @@ from app.schemas.workout_session import (
     CompleteWorkoutRequest,
     BatchSyncWorkoutRequest,
     BatchSyncWorkoutResponse,
+    UpdateWorkoutRequest,
+    UpdateWorkoutResponse,
 )
 from app.api.routes.gamification import update_streak_on_workout
 
@@ -410,6 +412,134 @@ async def batch_sync_workout(
         prs=prs,
         achievements=achievements,
         synced_at=datetime.now()
+    )
+
+
+@router.put("/{session_id}", response_model=UpdateWorkoutResponse)
+async def update_workout_session(
+    session_id: UUID,
+    request: UpdateWorkoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update an existing workout session.
+    Allows editing workout name, duration, notes, and all exercise sets.
+    """
+    from uuid import UUID as PyUUID
+    from sqlalchemy import delete as sql_delete
+
+    # Get existing session
+    result = await db.execute(
+        select(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workout session not found"
+        )
+
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this session"
+        )
+
+    # Update session fields
+    session.workout_name = request.workout_name
+    session.duration_seconds = request.duration_seconds
+    session.notes = request.notes
+
+    # Delete all existing sets for this session
+    await db.execute(
+        sql_delete(ExerciseSet).where(ExerciseSet.session_id == session_id)
+    )
+
+    # Recalculate total volume and add new sets
+    total_volume = 0
+    prs = []
+
+    for set_data in request.sets:
+        # Check if it's a PR
+        is_pr = False
+        if not set_data.is_warmup:
+            is_pr = await _check_if_pr(
+                db,
+                current_user.id,
+                set_data.exercise_name,
+                set_data.weight_kg,
+                set_data.reps
+            )
+
+        # Create new set (with existing ID if provided, otherwise generate new)
+        set_id = PyUUID(set_data.id) if set_data.id else None
+        exercise_set = ExerciseSet(
+            id=set_id,
+            session_id=session_id,
+            exercise_id=set_data.exercise_id,
+            exercise_name=set_data.exercise_name,
+            set_number=set_data.set_number,
+            weight_kg=set_data.weight_kg,
+            reps=set_data.reps,
+            is_warmup=set_data.is_warmup,
+            is_pr=is_pr,
+            rest_seconds=set_data.rest_seconds,
+            notes=set_data.notes,
+            completed_at=datetime.utcnow()
+        )
+        db.add(exercise_set)
+
+        # Update volume
+        if not set_data.is_warmup:
+            total_volume += int(set_data.weight_kg * set_data.reps)
+
+            if is_pr:
+                prs.append({
+                    "exercise": set_data.exercise_name,
+                    "weight_kg": float(set_data.weight_kg),
+                    "reps": set_data.reps
+                })
+
+    # Update session volume
+    session.total_volume = total_volume
+
+    await db.commit()
+
+    # Record all PRs
+    for set_data in request.sets:
+        if not set_data.is_warmup:
+            is_pr = await _check_if_pr(
+                db,
+                current_user.id,
+                set_data.exercise_name,
+                set_data.weight_kg,
+                set_data.reps
+            )
+            if is_pr:
+                await _record_pr(
+                    db,
+                    current_user.id,
+                    set_data.exercise_name,
+                    set_data.weight_kg,
+                    set_data.reps,
+                    session_id
+                )
+
+    # Re-query to get updated session with sets
+    result = await db.execute(
+        select(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.id == session_id)
+    )
+    updated_session = result.scalar_one()
+
+    return UpdateWorkoutResponse(
+        session=updated_session,
+        updated_at=datetime.utcnow()
     )
 
 

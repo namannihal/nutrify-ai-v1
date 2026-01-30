@@ -97,8 +97,8 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
         }
       }
 
-      // No local cache, fetch from server
-      final plan = await _apiService.getCurrentWorkoutPlan();
+      // No local cache, fetch from server (use RequestCacheService)
+      final plan = await _apiService.getCurrentWorkoutPlan(forceRefresh: forceRefresh);
       state = state.copyWith(
         currentPlan: plan,
         isLoading: false,
@@ -134,7 +134,7 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
   /// Sync from server in background (doesn't block UI)
   Future<void> _syncFromServerInBackground() async {
     try {
-      final plan = await _apiService.getCurrentWorkoutPlan();
+      final plan = await _apiService.getCurrentWorkoutPlan(forceRefresh: true);
       if (plan != null) {
         // Update state if plan is different
         if (state.currentPlan?.id != plan.id) {

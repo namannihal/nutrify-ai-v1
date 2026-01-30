@@ -8,13 +8,23 @@ import '../../providers/workout_session_provider.dart';
 import '../../providers/exercise_library_provider.dart';
 import '../../providers/gamification_provider.dart';
 import '../../providers/fitness_provider.dart';
+import '../../services/workout_cache_service.dart';
 import 'workout_summary_screen.dart';
 import 'exercise_picker_screen.dart';
 
 class ActiveWorkoutScreen extends ConsumerStatefulWidget {
   final Workout workout;
+  final DateTime? forDate; // Date the workout is for (defaults to today)
+  final bool editMode; // Whether we're editing an existing workout
+  final WorkoutSessionLocal? existingSession; // The session being edited
 
-  const ActiveWorkoutScreen({super.key, required this.workout});
+  const ActiveWorkoutScreen({
+    super.key,
+    required this.workout,
+    this.forDate,
+    this.editMode = false,
+    this.existingSession,
+  });
 
   @override
   ConsumerState<ActiveWorkoutScreen> createState() => _ActiveWorkoutScreenState();
@@ -31,7 +41,13 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(workoutSessionProvider.notifier).startWorkout(widget.workout);
+      if (widget.editMode && widget.existingSession != null) {
+        // Load existing workout data for editing
+        _loadExistingWorkout();
+      } else {
+        // Start new workout
+        ref.read(workoutSessionProvider.notifier).startWorkout(widget.workout, forDate: widget.forDate);
+      }
     });
   }
 
@@ -74,6 +90,22 @@ class _ActiveWorkoutScreenState extends ConsumerState<ActiveWorkoutScreen> {
       );
     }
     return _durationControllers[key]!;
+  }
+
+  /// Load existing workout data for editing
+  Future<void> _loadExistingWorkout() async {
+    if (widget.existingSession == null) return;
+
+    final session = widget.existingSession!;
+    final sets = await WorkoutCacheService.instance.getSessionSets(session.id);
+
+    // Start workout in edit mode with existing data
+    ref.read(workoutSessionProvider.notifier).loadExistingWorkout(
+      sessionId: session.id,
+      workoutName: session.workoutName,
+      startedAt: session.startedAt,
+      sets: sets,
+    );
   }
 
   @override

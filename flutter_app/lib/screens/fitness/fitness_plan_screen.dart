@@ -20,6 +20,74 @@ class FitnessPlanScreen extends ConsumerStatefulWidget {
 class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with WidgetsBindingObserver {
   int _selectedDay = DateTime.now().weekday; // 1=Monday, 7=Sunday
   List<WorkoutSessionLocal>? _completedWorkoutsToday;
+  Map<String, Map<String, int>> _exerciseSummaries = {}; // sessionId -> {exerciseName: setCount}
+
+  /// Get the actual date for the selected day number
+  DateTime _getSelectedDate() {
+    final now = DateTime.now();
+    final currentWeekday = now.weekday;
+    final daysFromToday = _selectedDay - currentWeekday;
+    return now.add(Duration(days: daysFromToday));
+  }
+
+  /// Check if the selected day is today
+  bool _isSelectedDayToday() {
+    final today = DateTime.now();
+    final selectedDate = _getSelectedDate();
+    return today.year == selectedDate.year &&
+           today.month == selectedDate.month &&
+           today.day == selectedDate.day;
+  }
+
+  /// Validate if a workout can be started and show appropriate error
+  Future<bool> _canStartWorkout() async {
+    final selectedDate = _getSelectedDate();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final selectedDateOnly = DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
+
+    // Check if future date
+    if (selectedDateOnly.isAfter(todayDate)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot start workout for future dates. Please select today\'s workout.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    // Check if past date
+    if (selectedDateOnly.isBefore(todayDate)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot start workout for past dates. Workouts can only be started today.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    // Check workout limit (max 2 per day)
+    final workoutCount = _completedWorkoutsToday?.length ?? 0;
+    if (workoutCount >= 2) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cannot start more than 2 workouts per day. You have already completed $workoutCount workouts today.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    return true;
+  }
 
   Future<void> _loadCompletedWorkoutsForDay(int dayNumber) async {
     try {
@@ -28,39 +96,34 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
       final currentWeekday = now.weekday;
       final daysFromToday = dayNumber - currentWeekday;
       final selectedDate = now.add(Duration(days: daysFromToday));
-      final selectedDateStr = selectedDate.toIso8601String().split('T')[0];
 
-      print('[FitnessPlan] Loading workouts for day $dayNumber (${selectedDateStr})');
+      print('[FitnessPlan] Loading workouts for day $dayNumber (${selectedDate.toString().split(' ')[0]})');
 
-      // Get workouts from local cache for this date
+      // Use the optimized getWorkoutsForDate method instead of filtering manually
       final workoutCache = WorkoutCacheService.instance;
-      final recentWorkouts = await workoutCache.getRecentWorkouts(days: 7);
+      final workoutsForDay = await workoutCache.getWorkoutsForDate(selectedDate);
 
-      print('[FitnessPlan] Found ${recentWorkouts.length} recent workouts in cache');
+      print('[FitnessPlan] Found ${workoutsForDay.length} workouts for selected day');
 
-      // Filter for the selected date
-      final workoutsForDay = recentWorkouts.where((session) {
-        if (session.completedAt == null) return false;
-        final completedDateStr = session.completedAt!.toIso8601String().split('T')[0];
-        final matches = completedDateStr == selectedDateStr && session.status == 'completed';
-        if (matches) {
-          print('[FitnessPlan] ✓ Workout "${session.workoutName}" matches date $completedDateStr');
-        }
-        return matches;
-      }).toList();
-
-      print('[FitnessPlan] Filtered to ${workoutsForDay.length} workouts for $selectedDateStr');
+      // Load exercise summaries for each workout
+      final summaries = <String, Map<String, int>>{};
+      for (final workout in workoutsForDay) {
+        final summary = await workoutCache.getSessionExerciseSummary(workout.id);
+        summaries[workout.id] = summary;
+      }
 
       if (mounted) {
         setState(() {
           _completedWorkoutsToday = workoutsForDay;
+          _exerciseSummaries = summaries;
         });
       }
     } catch (e) {
-      // Silently handle errors - not critical
+      print('[FitnessPlan] Error loading completed workouts: $e');
       if (mounted) {
         setState(() {
           _completedWorkoutsToday = null;
+          _exerciseSummaries = {};
         });
       }
     }
@@ -135,13 +198,6 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
 
   @override
   Widget build(BuildContext context) {
-    // Reload workouts when this screen is rebuilt (e.g., when navigating back)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _loadCompletedWorkoutsForDay(_selectedDay);
-      }
-    });
-
     final fitnessState = ref.watch(fitnessNotifierProvider);
     final generationState = ref.watch(generationNotifierProvider);
     final currentPlan = fitnessState.currentPlan;
@@ -419,15 +475,19 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
                             ),
                             const SizedBox(width: 8),
                             ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => ActiveWorkoutScreen(
-                                      workout: selectedWorkout,
+                              onPressed: () async {
+                                final canStart = await _canStartWorkout();
+                                if (canStart && mounted) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ActiveWorkoutScreen(
+                                        workout: selectedWorkout,
+                                        forDate: _getSelectedDate(),
+                                      ),
                                     ),
-                                  ),
-                                );
+                                  );
+                                }
                               },
                               icon: const Icon(Icons.play_arrow),
                               label: const Text('Start'),
@@ -503,6 +563,13 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
                                 padding: EdgeInsets.zero,
                                 visualDensity: VisualDensity.compact,
                               ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 20),
+                              onPressed: () => _editWorkout(session),
+                              tooltip: 'Edit workout',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -523,6 +590,33 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
                             ),
                           ],
                         ),
+                        // Show exercises done
+                        if (_exerciseSummaries[session.id]?.isNotEmpty ?? false) ...[
+                          const SizedBox(height: 12),
+                          Divider(color: Colors.green.withOpacity(0.3)),
+                          const SizedBox(height: 8),
+                          ..._exerciseSummaries[session.id]!.entries.map((exercise) => Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              children: [
+                                Icon(Icons.check, size: 14, color: Colors.green.shade700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    exercise.key,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ),
+                                Text(
+                                  '${exercise.value} sets',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )).toList(),
+                        ],
                       ],
                     ),
                   ),
@@ -706,14 +800,20 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
               leading: Icon(Icons.play_circle_fill, color: Theme.of(context).colorScheme.primary),
               title: const Text('Start Workout'),
               subtitle: const Text('Track sets, reps, and weights'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ActiveWorkoutScreen(workout: workout),
-                  ),
-                );
+                final canStart = await _canStartWorkout();
+                if (canStart && mounted) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ActiveWorkoutScreen(
+                        workout: workout,
+                        forDate: _getSelectedDate(),
+                      ),
+                    ),
+                  );
+                }
               },
             ),
             ListTile(
@@ -1096,6 +1196,64 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
     );
   }
 
+  /// Edit an existing completed workout
+  Future<void> _editWorkout(WorkoutSessionLocal session) async {
+    // Load the full session with sets
+    final sets = await WorkoutCacheService.instance.getSessionSets(session.id);
+
+    // Create a Workout object from the session
+    // Group sets by exercise to rebuild the workout
+    final exerciseMap = <String, List<ExerciseSetLocal>>{};
+    for (final set in sets) {
+      if (!exerciseMap.containsKey(set.exerciseName)) {
+        exerciseMap[set.exerciseName] = [];
+      }
+      exerciseMap[set.exerciseName]!.add(set);
+    }
+
+    // Create Exercise objects
+    final exercises = exerciseMap.entries.map((entry) {
+      final sets = entry.value;
+      return Exercise(
+        id: sets.first.exerciseId ?? 'custom_${DateTime.now().millisecondsSinceEpoch}',
+        name: entry.key,
+        description: '',
+        muscleGroups: [],
+        sets: sets.length,
+        reps: sets.first.reps,
+        restTimeSeconds: sets.first.restSeconds,
+        videoUrl: null,
+      );
+    }).toList();
+
+    // Create Workout object
+    final workout = Workout(
+      id: session.workoutId ?? 'custom_${DateTime.now().millisecondsSinceEpoch}',
+      name: session.workoutName,
+      description: 'Editing existing workout',
+      durationMinutes: session.durationSeconds ~/ 60,
+      exercises: exercises,
+    );
+
+    // Navigate to ActiveWorkoutScreen in edit mode
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ActiveWorkoutScreen(
+          workout: workout,
+          editMode: true,
+          existingSession: session,
+        ),
+      ),
+    );
+
+    // Refresh completed workouts after editing
+    if (mounted) {
+      _loadCompletedWorkoutsForDay(_selectedDay);
+    }
+  }
+
   void _showFitnessQuestionnaire(BuildContext context) {
     Navigator.push(
       context,
@@ -1135,22 +1293,28 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
               child: const Text('Cancel'),
             ),
             FilledButton.icon(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(dialogContext);
-                // Create a placeholder workout for quick start
-                final quickWorkout = Workout(
-                  id: 'quick_start_${DateTime.now().millisecondsSinceEpoch}',
-                  name: 'Quick Workout',
-                  description: 'Custom workout session',
-                  durationMinutes: 60,
-                  exercises: [], // Start with empty exercises, user can add from library
-                );
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ActiveWorkoutScreen(workout: quickWorkout),
-                  ),
-                );
+                final canStart = await _canStartWorkout();
+                if (canStart && mounted) {
+                  // Create a placeholder workout for quick start
+                  final quickWorkout = Workout(
+                    id: 'quick_start_${DateTime.now().millisecondsSinceEpoch}',
+                    name: 'Quick Workout',
+                    description: 'Custom workout session',
+                    durationMinutes: 60,
+                    exercises: [], // Start with empty exercises, user can add from library
+                  );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ActiveWorkoutScreen(
+                        workout: quickWorkout,
+                        forDate: _getSelectedDate(),
+                      ),
+                    ),
+                  );
+                }
               },
               icon: const Icon(Icons.play_arrow),
               label: const Text('Start'),

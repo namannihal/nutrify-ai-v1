@@ -74,8 +74,8 @@ class NutritionNotifier extends StateNotifier<NutritionState> {
         }
       }
 
-      // No local cache, fetch from server
-      final plan = await _apiService.getCurrentNutritionPlan();
+      // No local cache, fetch from server (use RequestCacheService)
+      final plan = await _apiService.getCurrentNutritionPlan(forceRefresh: forceRefresh);
       state = state.copyWith(
         currentPlan: plan,
         isLoading: false,
@@ -111,7 +111,7 @@ class NutritionNotifier extends StateNotifier<NutritionState> {
   /// Sync from server in background (doesn't block UI)
   Future<void> _syncFromServerInBackground() async {
     try {
-      final plan = await _apiService.getCurrentNutritionPlan();
+      final plan = await _apiService.getCurrentNutritionPlan(forceRefresh: true);
       if (plan != null) {
         // Update state if plan is different
         if (state.currentPlan?.id != plan.id) {

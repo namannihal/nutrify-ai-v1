@@ -42,7 +42,7 @@ class SyncService {
   Timer? _periodicSyncTimer;
 
   /// Initialize the sync service and start periodic syncing
-  void initialize({Duration syncInterval = const Duration(minutes: 5)}) {
+  void initialize({Duration syncInterval = const Duration(hours: 1)}) {
     _logger.d('Initializing SyncService with interval: $syncInterval');
 
     // Cancel any existing timer

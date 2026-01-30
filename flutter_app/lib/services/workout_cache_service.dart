@@ -84,6 +84,74 @@ class WorkoutCacheService {
     _logger.i('Saved workout session $sessionId with ${sets.length} sets to local DB');
   }
 
+  /// Update an existing workout session
+  /// Updates workout name, duration, notes, and replaces all exercise sets
+  Future<void> updateWorkoutSession({
+    required String sessionId,
+    required String workoutName,
+    required int durationSeconds,
+    String? notes,
+    required List<ExerciseSetLocal> sets,
+  }) async {
+    final db = await _cache.database;
+
+    await db.transaction((txn) async {
+      // Calculate total volume from new sets
+      int totalVolume = 0;
+      for (final set in sets) {
+        if (!set.isWarmup) {
+          totalVolume += (set.weightKg * set.reps).toInt();
+        }
+      }
+
+      // Update session
+      await txn.update(
+        'workout_sessions',
+        {
+          'workout_name': workoutName,
+          'duration_seconds': durationSeconds,
+          'notes': notes,
+          'total_volume': totalVolume,
+          'sync_status': 'pending', // Mark as needing sync
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+
+      // Delete all existing sets for this session
+      await txn.delete(
+        'exercise_sets',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+
+      // Insert new sets
+      for (final set in sets) {
+        await txn.insert(
+          'exercise_sets',
+          {
+            'id': set.id,
+            'session_id': sessionId,
+            'exercise_id': set.exerciseId,
+            'exercise_name': set.exerciseName,
+            'set_number': set.setNumber,
+            'weight_kg': set.weightKg,
+            'reps': set.reps,
+            'is_warmup': set.isWarmup ? 1 : 0,
+            'rest_seconds': set.restSeconds,
+            'completed_at': set.completedAt.toIso8601String(),
+            'notes': set.notes,
+            'sync_status': 'pending',
+            'is_pr': 0, // PRs will be recalculated by backend
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+
+    _logger.i('Updated workout session $sessionId with ${sets.length} sets');
+  }
+
   /// Get a workout session by ID
   Future<WorkoutSessionLocal?> getWorkoutSession(String sessionId) async {
     final db = await _cache.database;
@@ -223,6 +291,62 @@ class WorkoutCacheService {
     ''', [exerciseName, limit]);
 
     return results.map((r) => ExerciseSetLocal.fromMap(r)).toList();
+  }
+
+  /// Count workouts completed on a specific date (for validation)
+  Future<int> countWorkoutsForDate(DateTime date) async {
+    final db = await _cache.database;
+
+    // Get start and end of day in local time
+    final startOfDay = DateTime(date.year, date.month, date.day);
+    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+
+    final result = await db.rawQuery('''
+      SELECT COUNT(*) as count FROM workout_sessions
+      WHERE status = 'completed'
+      AND completed_at >= ?
+      AND completed_at <= ?
+    ''', [startOfDay.toIso8601String(), endOfDay.toIso8601String()]);
+
+    return (result.first['count'] as int?) ?? 0;
+  }
+
+  /// Get workouts completed on a specific date
+  Future<List<WorkoutSessionLocal>> getWorkoutsForDate(DateTime date) async {
+    final db = await _cache.database;
+
+    // Get start and end of day in local time
+    final startOfDay = DateTime(date.year, date.month, date.day);
+    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+
+    final results = await db.query(
+      'workout_sessions',
+      where: 'status = ? AND completed_at >= ? AND completed_at <= ?',
+      whereArgs: ['completed', startOfDay.toIso8601String(), endOfDay.toIso8601String()],
+      orderBy: 'completed_at DESC',
+    );
+
+    return results.map((r) => WorkoutSessionLocal.fromMap(r)).toList();
+  }
+
+  /// Get exercise summary for a workout session (unique exercises and set counts)
+  Future<Map<String, int>> getSessionExerciseSummary(String sessionId) async {
+    final db = await _cache.database;
+
+    final results = await db.rawQuery('''
+      SELECT exercise_name, COUNT(*) as set_count
+      FROM exercise_sets
+      WHERE session_id = ? AND is_warmup = 0
+      GROUP BY exercise_name
+      ORDER BY MIN(set_number)
+    ''', [sessionId]);
+
+    return Map.fromEntries(
+      results.map((row) => MapEntry(
+        row['exercise_name'] as String,
+        row['set_count'] as int,
+      ))
+    );
   }
 
   /// Delete old synced workouts (keep last N days)

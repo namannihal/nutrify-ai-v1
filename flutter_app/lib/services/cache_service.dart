@@ -65,7 +65,7 @@ class CacheService {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3, // Updated to add user_id to workout tables
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -127,6 +127,20 @@ class CacheService {
     if (oldVersion < 2) {
       await _addWorkoutTables(db);
     }
+
+    if (oldVersion < 3) {
+      // Add user_id column to workout tables for multi-user support
+      _logger.i('Adding user_id column to workout tables');
+
+      await db.execute('ALTER TABLE workout_sessions ADD COLUMN user_id TEXT');
+      await db.execute('ALTER TABLE exercise_sets ADD COLUMN user_id TEXT');
+
+      // Create index on user_id for faster queries
+      await db.execute('CREATE INDEX idx_workout_sessions_user ON workout_sessions(user_id)');
+      await db.execute('CREATE INDEX idx_exercise_sets_user ON exercise_sets(user_id)');
+
+      _logger.i('Added user_id column successfully');
+    }
   }
 
   Future<void> _addWorkoutTables(Database db) async {
@@ -136,6 +150,7 @@ class CacheService {
     await db.execute('''
       CREATE TABLE workout_sessions (
         id TEXT PRIMARY KEY,
+        user_id TEXT,
         workout_id TEXT,
         workout_name TEXT NOT NULL,
         started_at TEXT NOT NULL,
@@ -155,6 +170,7 @@ class CacheService {
     await db.execute('''
       CREATE TABLE exercise_sets (
         id TEXT PRIMARY KEY,
+        user_id TEXT,
         session_id TEXT NOT NULL,
         exercise_id TEXT,
         exercise_name TEXT NOT NULL,
@@ -188,9 +204,11 @@ class CacheService {
     // Indexes for performance
     await db.execute('CREATE INDEX idx_session_sync ON workout_sessions(sync_status)');
     await db.execute('CREATE INDEX idx_session_status ON workout_sessions(status)');
+    await db.execute('CREATE INDEX idx_session_user ON workout_sessions(user_id)');
     await db.execute('CREATE INDEX idx_set_sync ON exercise_sets(sync_status)');
     await db.execute('CREATE INDEX idx_set_session ON exercise_sets(session_id)');
     await db.execute('CREATE INDEX idx_set_exercise ON exercise_sets(exercise_name)');
+    await db.execute('CREATE INDEX idx_set_user ON exercise_sets(user_id)');
     await db.execute('CREATE INDEX idx_queue_pending ON workout_sync_queue(attempts)');
 
     _logger.i('Workout tables added successfully');
@@ -383,7 +401,25 @@ class CacheService {
     final db = await database;
     await db.delete('cache');
     await db.delete('user_data');
-    _logger.i('Cache cleared');
+    await db.delete('workout_sessions');
+    await db.delete('exercise_sets');
+    await db.delete('workout_sync_queue');
+    _logger.i('Cache cleared including workout data');
+  }
+
+  /// Clear workout data for a specific user (or all if userId is null)
+  Future<void> clearWorkoutData({String? userId}) async {
+    final db = await database;
+    if (userId != null) {
+      await db.delete('workout_sessions', where: 'user_id = ?', whereArgs: [userId]);
+      await db.delete('exercise_sets', where: 'user_id = ?', whereArgs: [userId]);
+      _logger.i('Cleared workout data for user: $userId');
+    } else {
+      await db.delete('workout_sessions');
+      await db.delete('exercise_sets');
+      await db.delete('workout_sync_queue');
+      _logger.i('Cleared all workout data');
+    }
   }
 
   /// Clear cache for a specific type

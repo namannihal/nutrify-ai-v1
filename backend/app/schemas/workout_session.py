@@ -170,3 +170,30 @@ class BatchSyncWorkoutResponse(BaseModel):
     prs: List[dict] = []
     achievements: List[dict] = []
     synced_at: datetime
+
+
+class UpdateExerciseSetData(BaseModel):
+    """Exercise set data for updating a workout"""
+    id: Optional[str] = None  # UUID as string, None for new sets
+    exercise_id: Optional[str] = None
+    exercise_name: str
+    set_number: int = Field(..., ge=1)
+    weight_kg: Decimal = Field(..., ge=0)
+    reps: int = Field(..., ge=0)
+    is_warmup: bool = False
+    rest_seconds: int = Field(default=90, ge=0)
+    notes: Optional[str] = None
+
+
+class UpdateWorkoutRequest(BaseModel):
+    """Request to update an existing workout session"""
+    workout_name: str
+    duration_seconds: int = Field(..., ge=0)
+    notes: Optional[str] = None
+    sets: List[UpdateExerciseSetData]
+
+
+class UpdateWorkoutResponse(BaseModel):
+    """Response from updating a workout"""
+    session: WorkoutSessionResponse
+    updated_at: datetime

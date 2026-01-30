@@ -69,9 +69,9 @@ class GamificationNotifier extends StateNotifier<GamificationState> {
   GamificationNotifier(this._apiService) : super(const GamificationState());
 
   /// Load streak data
-  Future<void> loadStreak() async {
+  Future<void> loadStreak({bool forceRefresh = false}) async {
     try {
-      final streak = await _apiService.getStreak();
+      final streak = await _apiService.getStreak(forceRefresh: forceRefresh);
       state = state.copyWith(streak: streak);
       _logger.d('Loaded streak: ${streak.currentStreak} days');
     } catch (e) {
@@ -81,10 +81,10 @@ class GamificationNotifier extends StateNotifier<GamificationState> {
   }
 
   /// Load all achievements with progress
-  Future<void> loadAchievements() async {
+  Future<void> loadAchievements({bool forceRefresh = false}) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      final achievements = await _apiService.getAchievementsWithProgress();
+      final achievements = await _apiService.getAchievementsWithProgress(forceRefresh: forceRefresh);
       state = state.copyWith(
         achievements: achievements,
         isLoading: false,

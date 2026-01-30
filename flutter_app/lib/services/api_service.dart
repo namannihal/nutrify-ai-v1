@@ -12,6 +12,7 @@ import '../models/progress.dart';
 import '../models/ai.dart';
 import '../models/workout_session.dart';
 import '../models/gamification.dart';
+import 'request_cache_service.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -34,8 +35,9 @@ class ApiService {
   final http.Client _client = http.Client();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   final Logger _logger = Logger();
-  
+
   String? _cachedToken;
+  String? _cachedUserId;
 
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
@@ -50,6 +52,35 @@ class ApiService {
   Future<void> setToken(String token) async {
     await _storage.write(key: _storageKeyToken, value: token);
     _cachedToken = token;
+  }
+
+  /// Set user ID for cache key scoping
+  void setUserId(String userId) {
+    _cachedUserId = userId;
+  }
+
+  /// Get user-specific cache key
+  String _getUserCacheKey(String baseKey) {
+    if (_cachedUserId != null) {
+      return '${baseKey}_user_${_cachedUserId}';
+    }
+    return baseKey; // Fallback for cases where user ID isn't set yet
+  }
+
+  /// Initialize user session after login/register
+  Future<void> _initializeUserSession() async {
+    try {
+      // Clear any stale cache from previous users
+      requestCache.clear();
+      _logger.i('Cleared cache on login');
+
+      // Fetch and store current user ID
+      final user = await getCurrentUser(forceRefresh: true);
+      _cachedUserId = user.id;
+      _logger.i('Set user ID: ${_cachedUserId}');
+    } catch (e) {
+      _logger.e('Failed to initialize user session: $e');
+    }
   }
 
   Future<void> _setToken(String? token) async {
@@ -267,7 +298,10 @@ class ApiService {
     final authResponse = AuthResponse.fromJson(response);
     await _setToken(authResponse.token);
     await _setRefreshToken(authResponse.refreshToken);
-    
+
+    // Initialize user session (clear cache, fetch user ID)
+    await _initializeUserSession();
+
     return authResponse;
   }
 
@@ -282,7 +316,10 @@ class ApiService {
     final authResponse = AuthResponse.fromJson(response);
     await _setToken(authResponse.token);
     await _setRefreshToken(authResponse.refreshToken);
-    
+
+    // Initialize user session (clear cache, fetch user ID)
+    await _initializeUserSession();
+
     return authResponse;
   }
 
@@ -301,7 +338,10 @@ class ApiService {
     final authResponse = AuthResponse.fromJson(response);
     await _setToken(authResponse.token);
     await _setRefreshToken(authResponse.refreshToken);
-    
+
+    // Initialize user session (clear cache, fetch user ID)
+    await _initializeUserSession();
+
     return authResponse;
   }
 
@@ -320,6 +360,11 @@ class ApiService {
       // Clear local tokens
       await _setToken(null);
       await _setRefreshToken(null);
+      _cachedUserId = null;
+
+      // CRITICAL: Clear ALL cached data when user logs out
+      requestCache.clear();
+      _logger.i('Cleared all cache on logout');
     }
   }
 
@@ -329,20 +374,34 @@ class ApiService {
   }
 
   // User methods
-  Future<User> getCurrentUser() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/users/me/basic',
+  Future<User> getCurrentUser({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('user_current'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/users/me/basic',
+        );
+        return User.fromJson(response);
+      },
+      ttl: const Duration(minutes: 15),
+      forceRefresh: forceRefresh,
     );
-    return User.fromJson(response);
   }
 
-  Future<UserProfile> getUserProfile() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/users/me',
+  Future<UserProfile> getUserProfile({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('user_profile'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/users/me',
+        );
+        return UserProfile.fromJson(response);
+      },
+      ttl: const Duration(minutes: 15),
+      forceRefresh: forceRefresh,
     );
-    return UserProfile.fromJson(response);
   }
 
   Future<UserProfile> updateUserProfile(Map<String, dynamic> profileData) async {
@@ -351,16 +410,26 @@ class ApiService {
       '/users/me',
       body: profileData,
     );
+    // Invalidate user caches after profile update
+    requestCache.invalidate(_getUserCacheKey('user_current'));
+    requestCache.invalidate(_getUserCacheKey('user_profile'));
     return UserProfile.fromJson(response);
   }
 
   // Nutrition methods
-  Future<NutritionPlan> getCurrentNutritionPlan() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/nutrition/current-plan',
+  Future<NutritionPlan> getCurrentNutritionPlan({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('nutrition_plan_current'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/nutrition/current-plan',
+        );
+        return NutritionPlan.fromJson(response);
+      },
+      ttl: const Duration(minutes: 10),
+      forceRefresh: forceRefresh,
     );
-    return NutritionPlan.fromJson(response);
   }
 
   Future<NutritionPlan> generateNutritionPlan() async {
@@ -370,6 +439,8 @@ class ApiService {
       // AI generation can take 3-5 minutes
       timeout: const Duration(minutes: 6),
     );
+    // Invalidate cached nutrition plan since we just generated a new one
+    requestCache.invalidate(_getUserCacheKey('nutrition_plan_current'));
     return NutritionPlan.fromJson(response);
   }
 
@@ -413,12 +484,19 @@ class ApiService {
   }
 
   // Fitness methods
-  Future<WorkoutPlan> getCurrentWorkoutPlan() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/fitness/current-plan',
+  Future<WorkoutPlan> getCurrentWorkoutPlan({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('fitness_plan_current'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/fitness/current-plan',
+        );
+        return WorkoutPlan.fromJson(response);
+      },
+      ttl: const Duration(minutes: 10),
+      forceRefresh: forceRefresh,
     );
-    return WorkoutPlan.fromJson(response);
   }
 
   Future<WorkoutPlan> generateWorkoutPlan() async {
@@ -428,6 +506,8 @@ class ApiService {
       // AI generation can take 3-5 minutes
       timeout: const Duration(minutes: 6),
     );
+    // Invalidate cached fitness plan since we just generated a new one
+    requestCache.invalidate(_getUserCacheKey('fitness_plan_current'));
     return WorkoutPlan.fromJson(response);
   }
 
@@ -918,6 +998,15 @@ class ApiService {
       },
       timeout: const Duration(seconds: 120), // Longer timeout for batch operations
     );
+
+    // Invalidate streak and gamification caches after workout completion
+    if (status == 'completed') {
+      requestCache.invalidate(_getUserCacheKey('gamification_streak'));
+      requestCache.invalidate(_getUserCacheKey('gamification_achievements'));
+      requestCache.invalidate(_getUserCacheKey('gamification_stats'));
+      requestCache.invalidate('personal_records'); // PRs may have been set
+    }
+
     return response;
   }
 
@@ -927,6 +1016,33 @@ class ApiService {
       'DELETE',
       '/workout-sessions/$sessionId',
     );
+  }
+
+  /// Update an existing workout session
+  /// Updates workout name, duration, notes, and all exercise sets
+  Future<WorkoutSession> updateWorkoutSession({
+    required String sessionId,
+    required String workoutName,
+    required int durationSeconds,
+    String? notes,
+    required List<Map<String, dynamic>> sets,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'PUT',
+      '/workout-sessions/$sessionId',
+      body: {
+        'workout_name': workoutName,
+        'duration_seconds': durationSeconds,
+        'notes': notes,
+        'sets': sets,
+      },
+    );
+
+    // Invalidate cache after update
+    requestCache.invalidate(_getUserCacheKey('workout_history'));
+
+    // Return the updated session from response
+    return WorkoutSession.fromJson(response['session']);
   }
 
   /// Get workout session history
@@ -951,32 +1067,53 @@ class ApiService {
   }
 
   /// Get all personal records
-  Future<List<PersonalRecord>> getPersonalRecords() async {
-    final response = await _makeRequest<List<dynamic>>(
-      'GET',
-      '/workout-sessions/personal-records',
+  Future<List<PersonalRecord>> getPersonalRecords({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      'personal_records',
+      () async {
+        final response = await _makeRequest<List<dynamic>>(
+          'GET',
+          '/workout-sessions/personal-records',
+        );
+        return response.map((json) => PersonalRecord.fromJson(json)).toList();
+      },
+      ttl: const Duration(minutes: 5),
+      forceRefresh: forceRefresh,
     );
-    return response.map((json) => PersonalRecord.fromJson(json)).toList();
   }
 
   // === Gamification Methods ===
 
   /// Get user's streak information
-  Future<UserStreak> getStreak() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/gamification/streak',
+  Future<UserStreak> getStreak({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('gamification_streak'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/gamification/streak',
+        );
+        return UserStreak.fromJson(response);
+      },
+      ttl: const Duration(minutes: 5),
+      forceRefresh: forceRefresh,
     );
-    return UserStreak.fromJson(response);
   }
 
   /// Get all achievements with user's progress
-  Future<List<AchievementProgress>> getAchievementsWithProgress() async {
-    final response = await _makeRequest<List<dynamic>>(
-      'GET',
-      '/gamification/achievements',
+  Future<List<AchievementProgress>> getAchievementsWithProgress({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('gamification_achievements'),
+      () async {
+        final response = await _makeRequest<List<dynamic>>(
+          'GET',
+          '/gamification/achievements',
+        );
+        return response.map((json) => AchievementProgress.fromJson(json)).toList();
+      },
+      ttl: const Duration(minutes: 5),
+      forceRefresh: forceRefresh,
     );
-    return response.map((json) => AchievementProgress.fromJson(json)).toList();
   }
 
   /// Get user's earned achievements
@@ -998,12 +1135,19 @@ class ApiService {
   }
 
   /// Get complete gamification stats for dashboard
-  Future<GamificationStats> getGamificationStats() async {
-    final response = await _makeRequest<Map<String, dynamic>>(
-      'GET',
-      '/gamification/stats',
+  Future<GamificationStats> getGamificationStats({bool forceRefresh = false}) async {
+    return await requestCache.deduplicate(
+      _getUserCacheKey('gamification_stats'),
+      () async {
+        final response = await _makeRequest<Map<String, dynamic>>(
+          'GET',
+          '/gamification/stats',
+        );
+        return GamificationStats.fromJson(response);
+      },
+      ttl: const Duration(minutes: 5),
+      forceRefresh: forceRefresh,
     );
-    return GamificationStats.fromJson(response);
   }
 }
 

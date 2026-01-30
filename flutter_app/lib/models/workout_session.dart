@@ -314,6 +314,7 @@ class ActiveExerciseProgress {
 
 /// Local model for a completed set (before syncing with backend)
 class CompletedSetLocal {
+  final String? id; // Unique ID for the set (for edit mode)
   final int setNumber;
   final double weightKg;
   final int reps;
@@ -322,8 +323,10 @@ class CompletedSetLocal {
   final bool isWarmup;
   final bool isPR;
   final String? backendId; // Set after syncing with backend
+  final DateTime? completedAt; // When the set was completed
 
   CompletedSetLocal({
+    this.id,
     required this.setNumber,
     this.weightKg = 0,
     this.reps = 0,
@@ -332,9 +335,11 @@ class CompletedSetLocal {
     this.isWarmup = false,
     this.isPR = false,
     this.backendId,
+    this.completedAt,
   });
 
   CompletedSetLocal copyWith({
+    String? id,
     int? setNumber,
     double? weightKg,
     int? reps,
@@ -343,8 +348,10 @@ class CompletedSetLocal {
     bool? isWarmup,
     bool? isPR,
     String? backendId,
+    DateTime? completedAt,
   }) {
     return CompletedSetLocal(
+      id: id ?? this.id,
       setNumber: setNumber ?? this.setNumber,
       weightKg: weightKg ?? this.weightKg,
       reps: reps ?? this.reps,
@@ -353,6 +360,7 @@ class CompletedSetLocal {
       isWarmup: isWarmup ?? this.isWarmup,
       isPR: isPR ?? this.isPR,
       backendId: backendId ?? this.backendId,
+      completedAt: completedAt ?? this.completedAt,
     );
   }
 

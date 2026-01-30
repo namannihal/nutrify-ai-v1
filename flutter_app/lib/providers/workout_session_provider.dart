@@ -73,6 +73,9 @@ class WorkoutSessionState {
   // Pending sets to sync (local-first)
   final List<PendingSet> pendingSets;
 
+  // Edit mode flag
+  final bool isEditMode;
+
   const WorkoutSessionState({
     this.activeSession,
     this.exercises = const [],
@@ -85,6 +88,7 @@ class WorkoutSessionState {
     this.isRestTimerActive = false,
     this.elapsedSeconds = 0,
     this.pendingSets = const [],
+    this.isEditMode = false,
   });
 
   WorkoutSessionState copyWith({
@@ -99,6 +103,7 @@ class WorkoutSessionState {
     bool? isRestTimerActive,
     int? elapsedSeconds,
     List<PendingSet>? pendingSets,
+    bool? isEditMode,
   }) {
     return WorkoutSessionState(
       activeSession: activeSession ?? this.activeSession,
@@ -112,6 +117,7 @@ class WorkoutSessionState {
       isRestTimerActive: isRestTimerActive ?? this.isRestTimerActive,
       elapsedSeconds: elapsedSeconds ?? this.elapsedSeconds,
       pendingSets: pendingSets ?? this.pendingSets,
+      isEditMode: isEditMode ?? this.isEditMode,
     );
   }
 
@@ -307,12 +313,37 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
   }
 
   /// Start a new workout session
-  Future<bool> startWorkout(Workout workout) async {
+  Future<bool> startWorkout(Workout workout, {DateTime? forDate}) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
 
+      // Validation 1: Only allow workouts for TODAY
+      final today = DateTime.now();
+      final todayDate = DateTime(today.year, today.month, today.day);
+
+      if (forDate != null) {
+        final targetDate = DateTime(forDate.year, forDate.month, forDate.day);
+
+        // Prevent future workouts
+        if (targetDate.isAfter(todayDate)) {
+          throw Exception('Cannot start workout for future dates. Please select today\'s workout.');
+        }
+
+        // Prevent past workouts
+        if (targetDate.isBefore(todayDate)) {
+          throw Exception('Cannot start workout for past dates. Workouts can only be started today.');
+        }
+      }
+
+      // Validation 2: Check workout limit (max 2 per day)
+      final workoutCount = await _workoutCache.countWorkoutsForDate(todayDate);
+      if (workoutCount >= 2) {
+        throw Exception('Cannot start more than 2 workouts per day. You have already completed $workoutCount workouts today.');
+      }
+
       _logger.d('Starting workout: id=${workout.id}, name=${workout.name}');
       _logger.d('Workout exercises count: ${workout.exercises.length}');
+      _logger.d('Workouts completed today: $workoutCount/2');
 
       // Only send workout_id if it's a valid UUID (not a quick start placeholder)
       final bool isValidUuid = _isValidUuid(workout.id);
@@ -361,6 +392,79 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
         error: e.toString(),
       );
       return false;
+    }
+  }
+
+  /// Load an existing workout session for editing
+  void loadExistingWorkout({
+    required String sessionId,
+    required String workoutName,
+    required DateTime startedAt,
+    required List<ExerciseSetLocal> sets,
+  }) {
+    try {
+      // Create a mock session object for the UI
+      final session = WorkoutSession(
+        id: sessionId,
+        userId: '', // Will be set properly when saving
+        workoutId: null,
+        workoutName: workoutName,
+        startedAt: startedAt,
+        completedAt: null,
+        status: 'active',
+        totalVolume: 0, // Will be recalculated
+        durationSeconds: 0, // Will be updated when saving
+        sets: [],
+      );
+
+      // Build exercise progress from existing sets
+      // Group sets by exercise
+      final exerciseMap = <String, List<ExerciseSetLocal>>{};
+      for (final set in sets) {
+        if (!exerciseMap.containsKey(set.exerciseName)) {
+          exerciseMap[set.exerciseName] = [];
+        }
+        exerciseMap[set.exerciseName]!.add(set);
+      }
+
+      // Create ActiveExerciseProgress for each exercise
+      final exercises = exerciseMap.entries.map((entry) {
+        final exerciseSets = entry.value;
+        return ActiveExerciseProgress(
+          exerciseId: exerciseSets.first.exerciseId ?? 'custom_${DateTime.now().millisecondsSinceEpoch}',
+          name: entry.key,
+          targetSets: exerciseSets.length,
+          targetReps: exerciseSets.first.reps,
+          restSeconds: exerciseSets.first.restSeconds,
+          completedSets: exerciseSets.map((s) => CompletedSetLocal(
+            id: s.id,
+            setNumber: s.setNumber,
+            weightKg: s.weightKg,
+            reps: s.reps,
+            isWarmup: s.isWarmup,
+            isPR: s.isPR,
+            completedAt: s.completedAt,
+          )).toList(),
+        );
+      }).toList();
+
+      state = state.copyWith(
+        activeSession: session,
+        exercises: exercises,
+        currentExerciseIndex: 0,
+        isLoading: false,
+        elapsedSeconds: 0,
+        pendingSets: [],
+        isEditMode: true, // Flag to indicate we're editing
+      );
+
+      _logger.i('Loaded existing workout for editing: $sessionId with ${sets.length} sets');
+    } catch (e) {
+      _logger.e('Failed to load existing workout: $e');
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
     }
   }
 
@@ -671,7 +775,7 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
       for (final exercise in state.exercises) {
         for (final set in exercise.completedSets) {
           allSets.add(ExerciseSetLocal(
-            id: _uuid.v4(), // Generate UUID for each set
+            id: set.id ?? _uuid.v4(), // Use existing ID in edit mode, or generate new
             sessionId: session.id,
             exerciseId: exercise.exerciseId,
             exerciseName: exercise.name,
@@ -680,7 +784,7 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
             reps: set.reps,
             isWarmup: set.isWarmup,
             restSeconds: exercise.restSeconds ?? 90,
-            completedAt: DateTime.now(),
+            completedAt: set.completedAt ?? DateTime.now(),
             notes: null,
             syncStatus: 'pending',
             isPR: false, // Will be determined by backend after sync
@@ -688,21 +792,33 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
         }
       }
 
-      // Save to local SQLite database (instant!)
-      await _workoutCache.saveWorkoutSession(
-        sessionId: session.id,
-        workoutName: session.workoutName,
-        workoutId: session.workoutId,
-        startedAt: session.startedAt,
-        completedAt: completedAt,
-        status: 'completed',
-        totalVolume: totalVolume,
-        durationSeconds: durationSeconds,
-        notes: notes,
-        sets: allSets,
-      );
-
-      _logger.i('Saved workout ${session.id} to local DB with ${allSets.length} sets');
+      // Save or update in local SQLite database (instant!)
+      if (state.isEditMode) {
+        // Update existing workout
+        await _workoutCache.updateWorkoutSession(
+          sessionId: session.id,
+          workoutName: session.workoutName,
+          durationSeconds: durationSeconds,
+          notes: notes,
+          sets: allSets,
+        );
+        _logger.i('Updated workout ${session.id} in local DB with ${allSets.length} sets');
+      } else {
+        // Create new workout
+        await _workoutCache.saveWorkoutSession(
+          sessionId: session.id,
+          workoutName: session.workoutName,
+          workoutId: session.workoutId,
+          startedAt: session.startedAt,
+          completedAt: completedAt,
+          status: 'completed',
+          totalVolume: totalVolume,
+          durationSeconds: durationSeconds,
+          notes: notes,
+          sets: allSets,
+        );
+        _logger.i('Saved new workout ${session.id} to local DB with ${allSets.length} sets');
+      }
 
       // Get summary from local database and convert to WorkoutSessionSummary
       final summaryData = await _workoutCache.getSessionSummary(session.id);
