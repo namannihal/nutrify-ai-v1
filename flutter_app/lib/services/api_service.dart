@@ -21,13 +21,13 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException: $message';
-}
+} 
 
 class ApiService {
   // Use your computer's local IP for both emulator and physical device
   // Run: ipconfig getifaddr en0 (Mac) or ipconfig (Windows) to get your IP
   // This works for both emulator and physical device on the same network
-  static const String _baseUrl = 'http://192.168.1.17:8000/api/v1';
+  static const String _baseUrl = 'http://192.168.1.25:8000/api/v1';
   static const String _storageKeyToken = 'auth_token';
   static const String _storageKeyRefreshToken = 'refresh_token';
   
@@ -884,6 +884,41 @@ class ApiService {
       },
     );
     return WorkoutSessionSummary.fromJson(response);
+  }
+
+  /// Batch sync workout session (new local-first approach)
+  Future<Map<String, dynamic>> batchSyncWorkout({
+    required String sessionId,
+    String? workoutId,
+    required String workoutName,
+    required DateTime startedAt,
+    DateTime? completedAt,
+    required String status,
+    required int totalVolume,
+    required int durationSeconds,
+    String? notes,
+    required List<Map<String, dynamic>> sets,
+  }) async {
+    final response = await _makeRequest<Map<String, dynamic>>(
+      'POST',
+      '/workout-sessions/batch-sync',
+      body: {
+        'session': {
+          'id': sessionId,
+          'workout_id': workoutId,
+          'workout_name': workoutName,
+          'started_at': startedAt.toIso8601String(),
+          'completed_at': completedAt?.toIso8601String(),
+          'status': status,
+          'total_volume': totalVolume,
+          'duration_seconds': durationSeconds,
+          'notes': notes,
+        },
+        'sets': sets,
+      },
+      timeout: const Duration(seconds: 120), // Longer timeout for batch operations
+    );
+    return response;
   }
 
   /// Abandon a workout session

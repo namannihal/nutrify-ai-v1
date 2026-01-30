@@ -262,7 +262,50 @@ class ProfileScreen extends ConsumerWidget {
               );
               
               if (shouldLogout == true) {
-                ref.read(authNotifierProvider.notifier).logout();
+                // Show loading while syncing
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Syncing data before logout...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                final result = await ref.read(authNotifierProvider.notifier).logout();
+
+                if (result == LogoutResult.pendingSyncFailed) {
+                  // Show warning dialog
+                  if (context.mounted) {
+                    final forceLogout = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Unsaved Workout Data'),
+                        content: const Text(
+                          'You have workouts that haven\'t been synced to the cloud. '
+                          'If you log out now, this data may be lost.\n\n'
+                          'Do you want to logout anyway?',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).colorScheme.error,
+                            ),
+                            child: const Text('Logout Anyway'),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (forceLogout == true) {
+                      await ref.read(authNotifierProvider.notifier).forceLogout();
+                    }
+                  }
+                }
               }
             },
             icon: const Icon(Icons.logout),

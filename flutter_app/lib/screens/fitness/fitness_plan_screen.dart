@@ -4,7 +4,9 @@ import '../../providers/fitness_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/generation_provider.dart' show generationNotifierProvider, GenerationState, GenerationTaskState;
 import '../../models/fitness.dart';
+import '../../models/workout_session.dart';
 import '../../widgets/common/loading_overlay.dart';
+import '../../services/workout_cache_service.dart';
 import 'active_workout_screen.dart';
 import 'fitness_questionnaire_screen.dart';
 
@@ -15,15 +17,63 @@ class FitnessPlanScreen extends ConsumerStatefulWidget {
   ConsumerState<FitnessPlanScreen> createState() => _FitnessPlanScreenState();
 }
 
-class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
+class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with WidgetsBindingObserver {
   int _selectedDay = DateTime.now().weekday; // 1=Monday, 7=Sunday
+  List<WorkoutSessionLocal>? _completedWorkoutsToday;
+
+  Future<void> _loadCompletedWorkoutsForDay(int dayNumber) async {
+    try {
+      // Get the date for the selected day
+      final now = DateTime.now();
+      final currentWeekday = now.weekday;
+      final daysFromToday = dayNumber - currentWeekday;
+      final selectedDate = now.add(Duration(days: daysFromToday));
+      final selectedDateStr = selectedDate.toIso8601String().split('T')[0];
+
+      print('[FitnessPlan] Loading workouts for day $dayNumber (${selectedDateStr})');
+
+      // Get workouts from local cache for this date
+      final workoutCache = WorkoutCacheService.instance;
+      final recentWorkouts = await workoutCache.getRecentWorkouts(days: 7);
+
+      print('[FitnessPlan] Found ${recentWorkouts.length} recent workouts in cache');
+
+      // Filter for the selected date
+      final workoutsForDay = recentWorkouts.where((session) {
+        if (session.completedAt == null) return false;
+        final completedDateStr = session.completedAt!.toIso8601String().split('T')[0];
+        final matches = completedDateStr == selectedDateStr && session.status == 'completed';
+        if (matches) {
+          print('[FitnessPlan] ✓ Workout "${session.workoutName}" matches date $completedDateStr');
+        }
+        return matches;
+      }).toList();
+
+      print('[FitnessPlan] Filtered to ${workoutsForDay.length} workouts for $selectedDateStr');
+
+      if (mounted) {
+        setState(() {
+          _completedWorkoutsToday = workoutsForDay;
+        });
+      }
+    } catch (e) {
+      // Silently handle errors - not critical
+      if (mounted) {
+        setState(() {
+          _completedWorkoutsToday = null;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(fitnessNotifierProvider.notifier).loadCurrentPlan();
       ref.read(fitnessNotifierProvider.notifier).loadWeeklyStats();
+      _loadCompletedWorkoutsForDay(_selectedDay);
 
       // Setup generation completion callbacks
       final generationNotifier = ref.read(generationNotifierProvider.notifier);
@@ -68,7 +118,30 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Reload workouts when app comes to foreground
+    if (state == AppLifecycleState.resumed) {
+      _loadCompletedWorkoutsForDay(_selectedDay);
+      ref.read(fitnessNotifierProvider.notifier).loadWeeklyStats();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Reload workouts when this screen is rebuilt (e.g., when navigating back)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadCompletedWorkoutsForDay(_selectedDay);
+      }
+    });
+
     final fitnessState = ref.watch(fitnessNotifierProvider);
     final generationState = ref.watch(generationNotifierProvider);
     final currentPlan = fitnessState.currentPlan;
@@ -185,6 +258,7 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                         setState(() {
                           _selectedDay = dayNumber;
                         });
+                        _loadCompletedWorkoutsForDay(dayNumber);
                       },
                     ),
                   );
@@ -237,8 +311,8 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
               ),
               
               const SizedBox(height: 16),
-              
-              if (currentPlan == null)
+
+              if (currentPlan == null && (_completedWorkoutsToday == null || _completedWorkoutsToday!.isEmpty))
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32.0),
@@ -381,14 +455,81 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> {
                 ...selectedWorkout.exercises.map((exercise) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _buildExerciseCard(
-                    context, 
+                    context,
                     exercise.name,
                     '${exercise.sets ?? 0} sets × ${exercise.reps ?? 0} reps',
                     Icons.fitness_center,
                   ),
                 )).toList(),
-              
-              if (currentPlan != null && selectedWorkout == null)
+
+              // Show completed custom workouts for this day
+              if (_completedWorkoutsToday != null && _completedWorkoutsToday!.isNotEmpty) ...[
+                if (selectedWorkout != null) const SizedBox(height: 16),
+                if (selectedWorkout != null) const Divider(),
+                const SizedBox(height: 16),
+                Text(
+                  selectedWorkout != null ? 'What You Actually Did' : 'Today\'s Completed Workout',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ..._completedWorkoutsToday!.map((session) => Card(
+                  color: Colors.green.withOpacity(0.1),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.check_circle, color: Colors.green, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                session.workoutName,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            if (session.syncStatus != 'synced')
+                              Chip(
+                                label: Text(
+                                  session.syncStatus == 'pending' ? 'Pending Sync' : 'Syncing...',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                backgroundColor: Colors.orange.withOpacity(0.2),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Icon(Icons.access_time, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${session.durationSeconds ~/ 60} min',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            const SizedBox(width: 16),
+                            Icon(Icons.fitness_center, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${session.totalVolume} kg',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                )).toList(),
+              ],
+
+              if (currentPlan != null && selectedWorkout == null && (_completedWorkoutsToday == null || _completedWorkoutsToday!.isEmpty))
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32.0),

@@ -2,12 +2,16 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'dart:convert';
 import '../models/workout_session.dart';
 import '../models/fitness.dart';
 import '../services/api_service.dart';
+import '../services/workout_cache_service.dart';
+import '../services/sync_service.dart';
 
 final _logger = Logger();
+final _uuid = Uuid();
 
 /// UUID validation regex
 final _uuidRegex = RegExp(
@@ -150,6 +154,8 @@ class WorkoutSessionState {
 /// Notifier for managing workout sessions with local-first approach
 class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
   final ApiService _apiService;
+  final WorkoutCacheService _workoutCache = WorkoutCacheService.instance;
+  final SyncService _syncService = SyncService();
   Timer? _restTimer;
   Timer? _elapsedTimer;
 
@@ -639,46 +645,91 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
     }
   }
 
-  /// Complete the workout session - syncs all pending sets
+  /// Complete the workout session - saves locally and syncs in background
   Future<WorkoutSessionSummary?> finishWorkout({String? notes}) async {
     if (state.activeSession == null) return null;
 
     try {
-      state = state.copyWith(isLoading: true, isSyncing: true, error: null);
+      state = state.copyWith(isLoading: true, error: null);
 
-      // Sync all pending sets to backend
-      final syncedPRs = <String>[];
-      for (final pendingSet in state.pendingSets) {
-        try {
-          final backendSet = await _apiService.logWorkoutSet(
-            sessionId: state.activeSession!.id,
-            exerciseId: pendingSet.exerciseId,
-            exerciseName: pendingSet.exerciseName,
-            setNumber: pendingSet.setNumber,
-            weightKg: pendingSet.weightKg,
-            reps: pendingSet.reps,
-            isWarmup: pendingSet.isWarmup,
-            restSeconds: pendingSet.restSeconds,
-          );
-          if (backendSet.isPR) {
-            syncedPRs.add(pendingSet.exerciseName);
+      final session = state.activeSession!;
+      final completedAt = DateTime.now();
+      final durationSeconds = state.elapsedSeconds;
+
+      // Calculate total volume from all completed sets
+      int totalVolume = 0;
+      for (final exercise in state.exercises) {
+        for (final set in exercise.completedSets) {
+          if (!set.isWarmup) {
+            totalVolume += (set.weightKg * set.reps).toInt();
           }
-        } catch (e) {
-          _logger.w('Failed to sync set: $e');
-          // Continue syncing other sets
         }
       }
 
-      // Complete the session
-      final summary = await _apiService.completeWorkoutSession(
-        sessionId: state.activeSession!.id,
+      // Convert all completed sets to ExerciseSetLocal format
+      final allSets = <ExerciseSetLocal>[];
+      for (final exercise in state.exercises) {
+        for (final set in exercise.completedSets) {
+          allSets.add(ExerciseSetLocal(
+            id: _uuid.v4(), // Generate UUID for each set
+            sessionId: session.id,
+            exerciseId: exercise.exerciseId,
+            exerciseName: exercise.name,
+            setNumber: set.setNumber,
+            weightKg: set.weightKg,
+            reps: set.reps,
+            isWarmup: set.isWarmup,
+            restSeconds: exercise.restSeconds ?? 90,
+            completedAt: DateTime.now(),
+            notes: null,
+            syncStatus: 'pending',
+            isPR: false, // Will be determined by backend after sync
+          ));
+        }
+      }
+
+      // Save to local SQLite database (instant!)
+      await _workoutCache.saveWorkoutSession(
+        sessionId: session.id,
+        workoutName: session.workoutName,
+        workoutId: session.workoutId,
+        startedAt: session.startedAt,
+        completedAt: completedAt,
+        status: 'completed',
+        totalVolume: totalVolume,
+        durationSeconds: durationSeconds,
         notes: notes,
+        sets: allSets,
       );
+
+      _logger.i('Saved workout ${session.id} to local DB with ${allSets.length} sets');
+
+      // Get summary from local database and convert to WorkoutSessionSummary
+      final summaryData = await _workoutCache.getSessionSummary(session.id);
+      WorkoutSessionSummary? summary;
+
+      if (summaryData != null) {
+        summary = WorkoutSessionSummary(
+          id: summaryData['id'],
+          workoutName: summaryData['workout_name'],
+          startedAt: DateTime.parse(summaryData['started_at']),
+          completedAt: DateTime.parse(summaryData['completed_at']),
+          durationSeconds: summaryData['duration_seconds'],
+          totalVolume: summaryData['total_volume'],
+          totalSets: summaryData['total_sets'],
+          exercisesCompleted: summaryData['exercises_completed'],
+          newPRs: (summaryData['new_prs'] as List).cast<Map<String, dynamic>>(),
+        );
+      }
+
+      // Queue background sync (non-blocking)
+      _syncService.queueWorkoutSync(session.id);
+      _logger.d('Queued workout ${session.id} for background sync');
 
       _restTimer?.cancel();
       _elapsedTimer?.cancel();
 
-      // Clear saved session
+      // Clear saved session from SharedPreferences
       await _clearSavedSession();
 
       state = const WorkoutSessionState(); // Reset state
@@ -688,7 +739,6 @@ class WorkoutSessionNotifier extends StateNotifier<WorkoutSessionState> {
       _logger.e('Failed to finish workout: $e');
       state = state.copyWith(
         isLoading: false,
-        isSyncing: false,
         error: e.toString(),
       );
       return null;

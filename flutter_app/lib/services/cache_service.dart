@@ -65,8 +65,9 @@ class CacheService {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -112,7 +113,87 @@ class CacheService {
       )
     ''');
 
+    // Add workout tables if version 2 or higher
+    if (version >= 2) {
+      await _addWorkoutTables(db);
+    }
+
     _logger.i('Cache database created successfully');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    _logger.i('Upgrading database from v$oldVersion to v$newVersion');
+
+    if (oldVersion < 2) {
+      await _addWorkoutTables(db);
+    }
+  }
+
+  Future<void> _addWorkoutTables(Database db) async {
+    _logger.i('Adding workout tables to database');
+
+    // Workout sessions table
+    await db.execute('''
+      CREATE TABLE workout_sessions (
+        id TEXT PRIMARY KEY,
+        workout_id TEXT,
+        workout_name TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        status TEXT DEFAULT 'active',
+        total_volume INTEGER DEFAULT 0,
+        duration_seconds INTEGER DEFAULT 0,
+        notes TEXT,
+        sync_status TEXT DEFAULT 'pending',
+        sync_attempts INTEGER DEFAULT 0,
+        last_sync_attempt TEXT,
+        created_locally_at TEXT NOT NULL
+      )
+    ''');
+
+    // Exercise sets table
+    await db.execute('''
+      CREATE TABLE exercise_sets (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        exercise_id TEXT,
+        exercise_name TEXT NOT NULL,
+        set_number INTEGER NOT NULL,
+        weight_kg REAL NOT NULL,
+        reps INTEGER NOT NULL,
+        is_warmup INTEGER DEFAULT 0,
+        rest_seconds INTEGER DEFAULT 90,
+        completed_at TEXT NOT NULL,
+        notes TEXT,
+        sync_status TEXT DEFAULT 'pending',
+        is_pr INTEGER DEFAULT 0,
+        FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Sync queue for retry logic
+    await db.execute('''
+      CREATE TABLE workout_sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        attempts INTEGER DEFAULT 0,
+        last_attempt TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // Indexes for performance
+    await db.execute('CREATE INDEX idx_session_sync ON workout_sessions(sync_status)');
+    await db.execute('CREATE INDEX idx_session_status ON workout_sessions(status)');
+    await db.execute('CREATE INDEX idx_set_sync ON exercise_sets(sync_status)');
+    await db.execute('CREATE INDEX idx_set_session ON exercise_sets(session_id)');
+    await db.execute('CREATE INDEX idx_set_exercise ON exercise_sets(exercise_name)');
+    await db.execute('CREATE INDEX idx_queue_pending ON workout_sync_queue(attempts)');
+
+    _logger.i('Workout tables added successfully');
   }
 
   // === Generic Cache Methods ===

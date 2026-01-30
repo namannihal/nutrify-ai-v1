@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/sync_service.dart';
 
 // Auth status enum for cleaner state management
 enum AuthStatus {
@@ -8,6 +9,12 @@ enum AuthStatus {
   unauthenticated, // No valid session
   authenticated,   // Logged in, onboarding completed
   needsOnboarding, // Logged in but needs onboarding
+}
+
+// Logout result enum
+enum LogoutResult {
+  success,            // Logout successful
+  pendingSyncFailed,  // Has unsynced workouts that failed to sync
 }
 
 // Auth state
@@ -158,7 +165,28 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> logout() async {
+  Future<LogoutResult> logout() async {
+    // Check for pending workouts before logging out
+    final hasPending = await syncService.hasPendingWorkouts();
+
+    if (hasPending) {
+      // Try to sync pending workouts first
+      final syncSuccess = await syncService.syncBeforeLogout();
+
+      if (!syncSuccess) {
+        // Sync failed - data may be lost
+        return LogoutResult.pendingSyncFailed;
+      }
+    }
+
+    // Safe to logout now
+    await _apiService.logout();
+    state = const AuthState(status: AuthStatus.unauthenticated);
+    return LogoutResult.success;
+  }
+
+  /// Force logout without syncing (use with caution!)
+  Future<void> forceLogout() async {
     await _apiService.logout();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

@@ -129,3 +129,44 @@ class LogSetRequest(BaseModel):
 class CompleteWorkoutRequest(BaseModel):
     """Request to complete a workout"""
     notes: Optional[str] = None
+
+
+class BatchSyncSetData(BaseModel):
+    """Exercise set data for batch sync"""
+    id: str  # UUID as string from client
+    exercise_id: Optional[str] = None
+    exercise_name: str
+    set_number: int = Field(..., ge=1)
+    weight_kg: Decimal = Field(..., ge=0)
+    reps: int = Field(..., ge=0)
+    is_warmup: bool = False
+    rest_seconds: int = Field(default=90, ge=0)
+    completed_at: datetime
+    notes: Optional[str] = None
+
+
+class BatchSyncSessionData(BaseModel):
+    """Workout session data for batch sync"""
+    id: str  # UUID as string from client
+    workout_id: Optional[str] = None
+    workout_name: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str  # 'active', 'completed', 'abandoned'
+    total_volume: int
+    duration_seconds: int
+    notes: Optional[str] = None
+
+
+class BatchSyncWorkoutRequest(BaseModel):
+    """Request to batch sync an entire workout session with all sets"""
+    session: BatchSyncSessionData
+    sets: List[BatchSyncSetData]
+
+
+class BatchSyncWorkoutResponse(BaseModel):
+    """Response from batch sync with PRs and achievements"""
+    session_id: UUID
+    prs: List[dict] = []
+    achievements: List[dict] = []
+    synced_at: datetime

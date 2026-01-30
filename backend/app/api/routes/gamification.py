@@ -245,11 +245,14 @@ async def get_achievements_with_progress(
     )
     all_achievements = result.scalars().all()
 
-    # Get user's earned achievements
+    # Get user's earned achievements with eager loading
     result = await db.execute(
-        select(UserAchievement).where(UserAchievement.user_id == current_user.id)
+        select(UserAchievement)
+        .options(selectinload(UserAchievement.achievement))
+        .where(UserAchievement.user_id == current_user.id)
     )
-    earned_map = {ua.achievement_id: ua for ua in result.scalars().all()}
+    earned = result.scalars().all()
+    earned_map = {ua.achievement_id: ua for ua in earned}
 
     # Get user stats
     streak = await _get_or_create_streak(db, current_user.id)

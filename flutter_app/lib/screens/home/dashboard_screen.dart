@@ -31,6 +31,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ref.read(nutritionNotifierProvider.notifier).loadCurrentPlan();
       ref.read(fitnessNotifierProvider.notifier).loadCurrentPlan();
       ref.read(progressNotifierProvider.notifier).loadProgressEntries();
+
+      // Refresh streak data to show updated streak after workouts
+      ref.invalidate(streakProvider);
     });
   }
 

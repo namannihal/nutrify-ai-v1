@@ -4,8 +4,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, String, Integer, Text, DECIMAL, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, String, Integer, Text, DECIMAL, ForeignKey, cast
+from sqlalchemy.orm import Mapped, mapped_column, relationship, foreign, remote
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -47,7 +47,11 @@ class WorkoutSession(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="workout_sessions")
-    workout: Mapped[Optional["Workout"]] = relationship("Workout")
+    workout: Mapped[Optional["Workout"]] = relationship(
+        "Workout",
+        primaryjoin="foreign(WorkoutSession.workout_id) == cast(Workout.id, String)",
+        viewonly=True,
+    )
     sets: Mapped[list["ExerciseSet"]] = relationship(
         "ExerciseSet",
         back_populates="session",
@@ -95,7 +99,11 @@ class ExerciseSet(Base):
 
     # Relationships
     session: Mapped["WorkoutSession"] = relationship("WorkoutSession", back_populates="sets")
-    exercise: Mapped[Optional["Exercise"]] = relationship("Exercise")
+    exercise: Mapped[Optional["Exercise"]] = relationship(
+        "Exercise",
+        primaryjoin="foreign(ExerciseSet.exercise_id) == cast(Exercise.id, String)",
+        viewonly=True,
+    )
 
 
 class PersonalRecord(Base):

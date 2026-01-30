@@ -4,6 +4,7 @@ import '../../models/workout_session.dart';
 import '../../models/gamification.dart';
 import '../../providers/gamification_provider.dart';
 import '../../widgets/achievement_dialog.dart';
+import '../../services/sync_service.dart';
 
 class WorkoutSummaryScreen extends ConsumerStatefulWidget {
   final WorkoutSessionSummary summary;
@@ -92,7 +93,127 @@ class _WorkoutSummaryScreenState extends ConsumerState<WorkoutSummaryScreen> {
                 ),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+
+              // Sync Status Indicator
+              StreamBuilder<SyncStatus>(
+                stream: syncService.workoutSyncStream,
+                initialData: syncService.workoutSyncStatus,
+                builder: (context, snapshot) {
+                  final status = snapshot.data ?? SyncStatus.idle;
+
+                  if (status == SyncStatus.syncing) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Syncing workout...',
+                            style: TextStyle(
+                              color: Colors.blue.shade700,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  } else if (status == SyncStatus.completed) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.green.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cloud_done, color: Colors.green, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Synced to cloud',
+                            style: TextStyle(
+                              color: Colors.green.shade700,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  } else if (status == SyncStatus.failed) {
+                    return InkWell(
+                      onTap: () => syncService.syncWorkoutsNow(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.cloud_off, color: Colors.orange, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Tap to retry sync',
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  // Default: show saved locally
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: theme.colorScheme.outline.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.save, color: theme.colorScheme.onSurfaceVariant, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Saved locally',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 24),
 
               // Stats Cards
               Row(

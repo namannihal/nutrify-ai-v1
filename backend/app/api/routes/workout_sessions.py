@@ -24,6 +24,8 @@ from app.schemas.workout_session import (
     StartWorkoutRequest,
     LogSetRequest,
     CompleteWorkoutRequest,
+    BatchSyncWorkoutRequest,
+    BatchSyncWorkoutResponse,
 )
 from app.api.routes.gamification import update_streak_on_workout
 
@@ -245,6 +247,169 @@ async def complete_workout(
         total_sets=len([s for s in session.sets if not s.is_warmup]),
         exercises_completed=unique_exercises,
         new_prs=new_prs
+    )
+
+
+@router.post("/batch-sync", response_model=BatchSyncWorkoutResponse)
+async def batch_sync_workout(
+    request: BatchSyncWorkoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Batch sync entire workout session with all sets in one API call.
+    This is the local-first endpoint that accepts complete workout data from device.
+    """
+    from uuid import UUID as PyUUID
+
+    session_data = request.session
+    sets_data = request.sets
+
+    # Convert string UUID to Python UUID
+    session_id = PyUUID(session_data.id)
+
+    # Check if session already exists
+    result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if session:
+        # Update existing session
+        if session.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to modify this session"
+            )
+
+        # Update session fields
+        session.workout_id = session_data.workout_id
+        session.workout_name = session_data.workout_name
+        session.started_at = session_data.started_at
+        session.completed_at = session_data.completed_at
+        session.status = session_data.status
+        session.total_volume = session_data.total_volume
+        session.duration_seconds = session_data.duration_seconds
+        session.notes = session_data.notes
+    else:
+        # Create new session
+        session = WorkoutSession(
+            id=session_id,
+            user_id=current_user.id,
+            workout_id=session_data.workout_id,
+            workout_name=session_data.workout_name,
+            started_at=session_data.started_at,
+            completed_at=session_data.completed_at,
+            status=session_data.status,
+            total_volume=session_data.total_volume,
+            duration_seconds=session_data.duration_seconds,
+            notes=session_data.notes
+        )
+        db.add(session)
+
+    # Process all sets
+    prs = []
+    for set_data in sets_data:
+        set_id = PyUUID(set_data.id)
+
+        # Check if set already exists
+        set_result = await db.execute(
+            select(ExerciseSet).where(ExerciseSet.id == set_id)
+        )
+        existing_set = set_result.scalar_one_or_none()
+
+        if existing_set:
+            # Update existing set
+            existing_set.exercise_id = set_data.exercise_id
+            existing_set.exercise_name = set_data.exercise_name
+            existing_set.set_number = set_data.set_number
+            existing_set.weight_kg = set_data.weight_kg
+            existing_set.reps = set_data.reps
+            existing_set.is_warmup = set_data.is_warmup
+            existing_set.rest_seconds = set_data.rest_seconds
+            existing_set.completed_at = set_data.completed_at
+            existing_set.notes = set_data.notes
+            exercise_set = existing_set
+        else:
+            # Create new set
+            exercise_set = ExerciseSet(
+                id=set_id,
+                session_id=session_id,
+                exercise_id=set_data.exercise_id,
+                exercise_name=set_data.exercise_name,
+                set_number=set_data.set_number,
+                weight_kg=set_data.weight_kg,
+                reps=set_data.reps,
+                is_warmup=set_data.is_warmup,
+                rest_seconds=set_data.rest_seconds,
+                completed_at=set_data.completed_at,
+                notes=set_data.notes
+            )
+            db.add(exercise_set)
+
+        # Check for personal record (only for non-warmup sets)
+        if not set_data.is_warmup:
+            is_pr = await _check_if_pr(
+                db,
+                current_user.id,
+                set_data.exercise_name,
+                set_data.weight_kg,
+                set_data.reps
+            )
+
+            if is_pr:
+                exercise_set.is_pr = True
+                prs.append({
+                    "exercise": set_data.exercise_name,
+                    "weight_kg": float(set_data.weight_kg),
+                    "reps": set_data.reps,
+                    "set_id": str(set_id)
+                })
+
+    # Commit all changes
+    await db.commit()
+
+    # Record all PRs in the PersonalRecord table
+    for set_data in sets_data:
+        if not set_data.is_warmup:
+            is_pr = await _check_if_pr(
+                db,
+                current_user.id,
+                set_data.exercise_name,
+                set_data.weight_kg,
+                set_data.reps
+            )
+            if is_pr:
+                await _record_pr(
+                    db,
+                    current_user.id,
+                    set_data.exercise_name,
+                    set_data.weight_kg,
+                    set_data.reps,
+                    session_id
+                )
+
+    # Update streak and check achievements if workout is completed
+    achievements = []
+    if session_data.status == "completed" and session_data.completed_at:
+        workout_minutes = session_data.duration_seconds // 60
+        streak, new_achievements = await update_streak_on_workout(
+            db,
+            current_user.id,  # Fixed: pass user_id not user object
+            workout_minutes    # Fixed: pass duration in minutes, not completed_at datetime
+        )
+        achievements = [
+            {"name": ach.name, "description": ach.description, "points": ach.points}
+            for ach in new_achievements
+        ]
+
+    await db.commit()  # Commit streak and achievement updates
+
+    return BatchSyncWorkoutResponse(
+        session_id=session_id,
+        prs=prs,
+        achievements=achievements,
+        synced_at=datetime.now()
     )
 
 
