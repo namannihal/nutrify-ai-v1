@@ -32,6 +32,7 @@ UserProfile _$UserProfileFromJson(Map<String, dynamic> json) => UserProfile(
   height: (json['height'] as num?)?.toDouble(),
   weight: (json['weight'] as num?)?.toDouble(),
   activityLevel: json['activity_level'] as String?,
+  primaryGoal: json['primary_goal'] as String?,
   goals: (json['goals'] as List<dynamic>?)?.map((e) => e as String).toList(),
   dietaryRestrictions: (json['dietary_restrictions'] as List<dynamic>?)
       ?.map((e) => e as String)
@@ -40,6 +41,8 @@ UserProfile _$UserProfileFromJson(Map<String, dynamic> json) => UserProfile(
   onboardingCompleted: json['onboarding_completed'] as bool?,
   createdAt: json['created_at'] as String?,
   updatedAt: json['updated_at'] as String?,
+  nutritionPreferences: json['nutrition_preferences'] as Map<String, dynamic>?,
+  fitnessPreferences: json['fitness_preferences'] as Map<String, dynamic>?,
 );
 
 Map<String, dynamic> _$UserProfileToJson(UserProfile instance) =>
@@ -51,12 +54,15 @@ Map<String, dynamic> _$UserProfileToJson(UserProfile instance) =>
       'height': instance.height,
       'weight': instance.weight,
       'activity_level': instance.activityLevel,
+      'primary_goal': instance.primaryGoal,
       'goals': instance.goals,
       'dietary_restrictions': instance.dietaryRestrictions,
       'fitness_experience': instance.fitnessExperience,
       'onboarding_completed': instance.onboardingCompleted,
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
+      'nutrition_preferences': instance.nutritionPreferences,
+      'fitness_preferences': instance.fitnessPreferences,
     };
 
 AuthResponse _$AuthResponseFromJson(Map<String, dynamic> json) => AuthResponse(

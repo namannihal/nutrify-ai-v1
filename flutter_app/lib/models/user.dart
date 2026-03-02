@@ -48,6 +48,8 @@ class UserProfile {
   final double? weight; // kg
   @JsonKey(name: 'activity_level')
   final String? activityLevel;
+  @JsonKey(name: 'primary_goal')
+  final String? primaryGoal;
   final List<String>? goals;
   @JsonKey(name: 'dietary_restrictions')
   final List<String>? dietaryRestrictions;
@@ -68,13 +70,22 @@ class UserProfile {
     this.height,
     this.weight,
     this.activityLevel,
+    this.primaryGoal,
     this.goals,
     this.dietaryRestrictions,
     this.fitnessExperience,
     this.onboardingCompleted,
     this.createdAt,
     this.updatedAt,
+    this.nutritionPreferences,
+    this.fitnessPreferences,
   });
+
+  @JsonKey(name: 'nutrition_preferences')
+  final Map<String, dynamic>? nutritionPreferences;
+
+  @JsonKey(name: 'fitness_preferences')
+  final Map<String, dynamic>? fitnessPreferences; // Added field
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => _$UserProfileFromJson(json);
   Map<String, dynamic> toJson() => _$UserProfileToJson(this);

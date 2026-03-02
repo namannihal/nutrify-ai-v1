@@ -1,5 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/ai.dart';
+
+// Temporary placeholder provider until ai_provider is implemented
+final aiNotifierProvider = StateNotifierProvider<AiNotifier, AiState>((ref) {
+  return AiNotifier();
+});
+
+class AiState {
+  final List<ChatMessage> chatHistory;
+  final bool isLoading;
+  final String? error;
+
+  const AiState({
+    this.chatHistory = const [],
+    this.isLoading = false,
+    this.error,
+  });
+
+  AiState copyWith({
+    List<ChatMessage>? chatHistory,
+    bool? isLoading,
+    String? error,
+  }) {
+    return AiState(
+      chatHistory: chatHistory ?? this.chatHistory,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class AiNotifier extends StateNotifier<AiState> {
+  AiNotifier() : super(const AiState());
+
+  Future<void> loadChatHistory() async {
+    // TODO: Implement API call
+    state = state.copyWith(isLoading: false);
+  }
+
+  Future<void> sendMessage(String message) async {
+    // TODO: Implement API call
+    state = state.copyWith(isLoading: false);
+  }
+
+  void clearError() {
+    state = state.copyWith(error: null);
+  }
+}
 
 class AiChatScreen extends ConsumerStatefulWidget {
   const AiChatScreen({super.key});
@@ -11,14 +59,15 @@ class AiChatScreen extends ConsumerStatefulWidget {
 class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
-  final List<ChatMessage> _messages = [
-    ChatMessage(
-      text: 'Hi there! I\'m your AI nutrition and fitness coach. How can I help you today?',
-      isUser: false,
-      timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
-    ),
-  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Load chat history when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(aiNotifierProvider.notifier).loadChatHistory();
+    });
+  }
 
   @override
   void dispose() {
@@ -27,76 +76,59 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     if (_messageController.text.trim().isEmpty) return;
 
-    final userMessage = ChatMessage(
-      text: _messageController.text.trim(),
-      isUser: true,
-      timestamp: DateTime.now(),
-    );
-
-    setState(() {
-      _messages.add(userMessage);
-      _messageController.clear();
-    });
+    final messageText = _messageController.text.trim();
+    _messageController.clear();
 
     // Scroll to bottom
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-
-    // Simulate AI response
-    Future.delayed(const Duration(seconds: 1), () {
-      final aiResponse = ChatMessage(
-        text: _getAiResponse(userMessage.text),
-        isUser: false,
-        timestamp: DateTime.now(),
-      );
-      
-      setState(() {
-        _messages.add(aiResponse);
-      });
-
-      // Scroll to bottom again
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
-      });
+      }
     });
-  }
 
-  String _getAiResponse(String userMessage) {
-    // Simple response logic - in real app this would connect to backend AI
-    if (userMessage.toLowerCase().contains('meal') || userMessage.toLowerCase().contains('food')) {
-      return 'Based on your current nutrition plan, I recommend focusing on lean proteins and complex carbs. Would you like me to suggest some specific meal ideas?';
-    } else if (userMessage.toLowerCase().contains('workout') || userMessage.toLowerCase().contains('exercise')) {
-      return 'Great question about workouts! Based on your fitness goals, I suggest maintaining consistency with your current routine. Need help modifying any exercises?';
-    } else if (userMessage.toLowerCase().contains('weight') || userMessage.toLowerCase().contains('progress')) {
-      return 'Your progress is looking good! Remember, sustainable weight loss is typically 1-2 pounds per week. Keep tracking your measurements and stay consistent.';
-    } else {
-      return 'Thanks for your question! I\'m here to help with nutrition, fitness, and wellness advice. What specific area would you like to focus on today?';
-    }
+    // Send message to AI via provider
+    await ref.read(aiNotifierProvider.notifier).sendMessage(messageText);
+
+    // Scroll to bottom again after response
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final aiState = ref.watch(aiNotifierProvider);
+    final messages = aiState.chatHistory;
+    final isLoading = aiState.isLoading;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI Coach'),
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              ref.read(aiNotifierProvider.notifier).loadChatHistory();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.more_vert),
             onPressed: () {
-              // TODO: Show chat options
+              // TODO: Show chat options (clear history, etc.)
             },
           ),
         ],
@@ -104,7 +136,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
       body: Column(
         children: [
           // Suggested Questions (shown when no messages)
-          if (_messages.length <= 1)
+          if (messages.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -134,16 +166,77 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
           
           // Chat Messages
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final message = _messages[index];
-                return _buildMessageBubble(message);
-              },
-            ),
+            child: messages.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Start a conversation',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Ask me anything about nutrition and fitness',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: messages.length + (isLoading ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == messages.length && isLoading) {
+                        return _buildLoadingBubble();
+                      }
+                      final message = messages[index];
+                      return _buildMessageBubble(message);
+                    },
+                  ),
           ),
+          
+          // Error message
+          if (aiState.error != null)
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      aiState.error!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () {
+                      ref.read(aiNotifierProvider.notifier).clearError();
+                    },
+                  ),
+                ],
+              ),
+            ),
           
           // Message Input
           Container(
@@ -207,13 +300,14 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   }
 
   Widget _buildMessageBubble(ChatMessage message) {
+    final isUser = message.messageType == 'user';
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
-        mainAxisAlignment: message.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!message.isUser) ...[
+          if (!isUser) ...[
             Container(
               width: 32,
               height: 32,
@@ -233,31 +327,31 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: message.isUser
+                color: isUser
                     ? Theme.of(context).colorScheme.primary
                     : Theme.of(context).colorScheme.surfaceVariant,
                 borderRadius: BorderRadius.circular(18).copyWith(
-                  bottomLeft: message.isUser ? const Radius.circular(18) : const Radius.circular(4),
-                  bottomRight: message.isUser ? const Radius.circular(4) : const Radius.circular(18),
+                  bottomLeft: isUser ? const Radius.circular(18) : const Radius.circular(4),
+                  bottomRight: isUser ? const Radius.circular(4) : const Radius.circular(18),
                 ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.text,
+                    message.content,
                     style: TextStyle(
-                      color: message.isUser
+                      color: isUser
                           ? Colors.white
                           : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatTime(message.timestamp),
+                    _formatTime(DateTime.parse(message.createdAt)),
                     style: TextStyle(
                       fontSize: 12,
-                      color: message.isUser
+                      color: isUser
                           ? Colors.white.withOpacity(0.7)
                           : Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
                     ),
@@ -266,7 +360,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
               ),
             ),
           ),
-          if (message.isUser) ...[
+          if (isUser) ...[
             const SizedBox(width: 8),
             Container(
               width: 32,
@@ -286,7 +380,63 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
       ),
     );
   }
-
+  
+  Widget _buildLoadingBubble() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.smart_toy,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(18).copyWith(
+                bottomLeft: const Radius.circular(4),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Thinking...',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   String _formatTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
@@ -301,16 +451,4 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
       return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     }
   }
-}
-
-class ChatMessage {
-  final String text;
-  final bool isUser;
-  final DateTime timestamp;
-
-  ChatMessage({
-    required this.text,
-    required this.isUser,
-    required this.timestamp,
-  });
 }

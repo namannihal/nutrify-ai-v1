@@ -1,6 +1,21 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/sync_service.dart';
+
+// Auth status enum for cleaner state management
+enum AuthStatus {
+  unknown,        // Initial state, checking auth
+  unauthenticated, // No valid session
+  authenticated,   // Logged in, onboarding completed
+  needsOnboarding, // Logged in but needs onboarding
+}
+
+// Logout result enum
+enum LogoutResult {
+  success,            // Logout successful
+  pendingSyncFailed,  // Has unsynced workouts that failed to sync
+}
 
 // Auth state
 class AuthState {
@@ -8,12 +23,14 @@ class AuthState {
   final UserProfile? profile;
   final bool isLoading;
   final String? error;
+  final AuthStatus status;
 
   const AuthState({
     this.user,
     this.profile,
     this.isLoading = false,
     this.error,
+    this.status = AuthStatus.unknown,
   });
 
   AuthState copyWith({
@@ -21,12 +38,14 @@ class AuthState {
     UserProfile? profile,
     bool? isLoading,
     String? error,
+    AuthStatus? status,
   }) {
     return AuthState(
       user: user ?? this.user,
       profile: profile ?? this.profile,
       isLoading: isLoading ?? this.isLoading,
       error: error,
+      status: status ?? this.status,
     );
   }
 
@@ -38,35 +57,48 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _apiService;
 
-  AuthNotifier(this._apiService) : super(const AuthState()) {
+  AuthNotifier(this._apiService) : super(const AuthState(status: AuthStatus.unknown)) {
     _initializeAuth();
   }
 
   Future<void> _initializeAuth() async {
     if (await _apiService.isLoggedIn) {
       await _loadUserData();
+    } else {
+      // No stored token, user needs to log in
+      state = state.copyWith(status: AuthStatus.unauthenticated);
     }
   }
 
   Future<void> _loadUserData() async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
+
       final user = await _apiService.getCurrentUser();
       state = state.copyWith(user: user);
 
       // Try to load profile
       try {
         final profile = await _apiService.getUserProfile();
-        state = state.copyWith(profile: profile, isLoading: false);
+        final hasOnboarded = profile.onboardingCompleted ?? false;
+        state = state.copyWith(
+          profile: profile,
+          isLoading: false,
+          status: hasOnboarded ? AuthStatus.authenticated : AuthStatus.needsOnboarding,
+        );
       } catch (e) {
-        // Profile might not exist yet (404)
-        state = state.copyWith(isLoading: false);
+        // Profile might not exist yet (404) - needs onboarding
+        state = state.copyWith(
+          isLoading: false,
+          status: AuthStatus.needsOnboarding,
+        );
       }
     } catch (e) {
+      // Failed to get user - token might be invalid
       state = state.copyWith(
         error: e.toString(),
         isLoading: false,
+        status: AuthStatus.unauthenticated,
       );
     }
   }
@@ -79,11 +111,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
+
       final name = '$firstName $lastName';
       final authResponse = await _apiService.register(email, password, name);
       state = state.copyWith(user: authResponse.user);
-      
+
       await _loadUserProfile();
       return true;
     } catch (e) {
@@ -98,10 +130,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> login(String email, String password) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
+
       final authResponse = await _apiService.login(email, password);
       state = state.copyWith(user: authResponse.user);
-      
+
       await _loadUserProfile();
       return true;
     } catch (e) {
@@ -116,12 +148,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> loginWithGoogle() async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
+
       // For now, we'll use a placeholder implementation
       // TODO: Implement actual Google Sign-In
       final authResponse = await _apiService.googleSignIn();
       state = state.copyWith(user: authResponse.user);
-      
+
       await _loadUserProfile();
       return true;
     } catch (e) {
@@ -133,28 +165,68 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> logout() async {
+  Future<LogoutResult> logout() async {
+    // Check for pending workouts before logging out
+    final hasPending = await syncService.hasPendingWorkouts();
+
+    if (hasPending) {
+      // Try to sync pending workouts first
+      final syncSuccess = await syncService.syncBeforeLogout();
+
+      if (!syncSuccess) {
+        // Sync failed - data may be lost
+        return LogoutResult.pendingSyncFailed;
+      }
+    }
+
+    // Safe to logout now
     await _apiService.logout();
-    state = const AuthState();
+    state = const AuthState(status: AuthStatus.unauthenticated);
+    return LogoutResult.success;
+  }
+
+  /// Force logout without syncing (use with caution!)
+  Future<void> forceLogout() async {
+    await _apiService.logout();
+    state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
   Future<void> _loadUserProfile() async {
     try {
       final profile = await _apiService.getUserProfile();
-      state = state.copyWith(profile: profile, isLoading: false);
+      final hasOnboarded = profile.onboardingCompleted ?? false;
+      state = state.copyWith(
+        profile: profile,
+        isLoading: false,
+        status: hasOnboarded ? AuthStatus.authenticated : AuthStatus.needsOnboarding,
+      );
     } catch (e) {
-      // Profile might not exist yet
-      state = state.copyWith(isLoading: false);
+      // Profile might not exist yet - needs onboarding
+      state = state.copyWith(
+        isLoading: false,
+        status: AuthStatus.needsOnboarding,
+      );
     }
+  }
+
+  Future<void> refreshUserData() async {
+    await _loadUserData();
   }
 
   Future<bool> updateProfile(Map<String, dynamic> profileData) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
+
       final updatedProfile = await _apiService.updateUserProfile(profileData);
-      state = state.copyWith(profile: updatedProfile, isLoading: false);
-      
+
+      // Determine auth status based on onboarding completion
+      final hasOnboarded = updatedProfile.onboardingCompleted ?? false;
+      state = state.copyWith(
+        profile: updatedProfile,
+        isLoading: false,
+        status: hasOnboarded ? AuthStatus.authenticated : AuthStatus.needsOnboarding,
+      );
+
       return true;
     } catch (e) {
       state = state.copyWith(

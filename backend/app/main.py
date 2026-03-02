@@ -8,7 +8,7 @@ import structlog
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis import redis_client
-from app.api.routes import auth, users, nutrition, fitness, progress, ai
+from app.api.routes import auth, users, nutrition, fitness, progress, ai, subscriptions, workout_sessions, gamification
 
 # Configure structured logging
 structlog.configure(
@@ -111,6 +111,9 @@ app.include_router(nutrition.router, prefix=f"{settings.api_v1_prefix}/nutrition
 app.include_router(fitness.router, prefix=f"{settings.api_v1_prefix}/fitness", tags=["Fitness"])
 app.include_router(progress.router, prefix=f"{settings.api_v1_prefix}/progress", tags=["Progress"])
 app.include_router(ai.router, prefix=f"{settings.api_v1_prefix}/ai", tags=["AI"])
+app.include_router(subscriptions.router, prefix=f"{settings.api_v1_prefix}/subscriptions", tags=["Subscriptions"])
+app.include_router(workout_sessions.router, prefix=f"{settings.api_v1_prefix}/workout-sessions", tags=["Workout Sessions"])
+app.include_router(gamification.router, prefix=f"{settings.api_v1_prefix}/gamification", tags=["Gamification"])
 
 
 # Global exception handler

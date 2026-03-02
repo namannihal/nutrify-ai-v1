@@ -1,28 +1,59 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../models/fitness.dart';
 import '../services/api_service.dart';
+import '../services/local_database.dart';
+
+final _logger = Logger();
+
+// Weekly stats model
+class WeeklyWorkoutStats {
+  final int completedWorkouts;
+  final double totalDurationHours;
+  final int totalCaloriesBurned;
+
+  const WeeklyWorkoutStats({
+    this.completedWorkouts = 0,
+    this.totalDurationHours = 0.0,
+    this.totalCaloriesBurned = 0,
+  });
+}
 
 // Fitness state
 class FitnessState {
   final WorkoutPlan? currentPlan;
   final bool isLoading;
   final String? error;
+  final WeeklyWorkoutStats weeklyStats;
+  final List<Map<String, dynamic>> workoutLogs;
+  final bool isFromLocalCache;
 
   const FitnessState({
     this.currentPlan,
     this.isLoading = false,
     this.error,
+    this.weeklyStats = const WeeklyWorkoutStats(),
+    this.workoutLogs = const [],
+    this.isFromLocalCache = false,
   });
 
   FitnessState copyWith({
     WorkoutPlan? currentPlan,
     bool? isLoading,
     String? error,
+    WeeklyWorkoutStats? weeklyStats,
+    List<Map<String, dynamic>>? workoutLogs,
+    bool? isFromLocalCache,
   }) {
     return FitnessState(
       currentPlan: currentPlan ?? this.currentPlan,
       isLoading: isLoading ?? this.isLoading,
       error: error,
+      weeklyStats: weeklyStats ?? this.weeklyStats,
+      workoutLogs: workoutLogs ?? this.workoutLogs,
+      isFromLocalCache: isFromLocalCache ?? this.isFromLocalCache,
     );
   }
 }
@@ -30,19 +61,97 @@ class FitnessState {
 // Fitness notifier
 class FitnessNotifier extends StateNotifier<FitnessState> {
   final ApiService _apiService;
+  bool _hasLoadedOnce = false;
+  String? _currentUserId;
 
   FitnessNotifier(this._apiService) : super(const FitnessState());
 
-  Future<void> loadCurrentPlan() async {
+  void setUserId(String userId) {
+    _currentUserId = userId;
+  }
+
+  Future<void> loadCurrentPlan({bool forceRefresh = false}) async {
+    // Skip loading if we already have a plan and this isn't a force refresh
+    if (!forceRefresh && _hasLoadedOnce && state.currentPlan != null) {
+      return;
+    }
+
     try {
       state = state.copyWith(isLoading: true, error: null);
-      final plan = await _apiService.getCurrentWorkoutPlan();
-      state = state.copyWith(currentPlan: plan, isLoading: false);
-    } catch (e) {
+
+      // Try to load from local cache first (instant)
+      if (_currentUserId != null && !forceRefresh) {
+        final localPlan = await LocalDatabase.getFitnessPlan(_currentUserId!);
+        if (localPlan != null) {
+          _logger.d('Loaded fitness plan from local cache');
+          state = state.copyWith(
+            currentPlan: localPlan,
+            isLoading: false,
+            isFromLocalCache: true,
+          );
+          _hasLoadedOnce = true;
+
+          // Sync from server in background
+          _syncFromServerInBackground();
+          return;
+        }
+      }
+
+      // No local cache, fetch from server (use RequestCacheService)
+      final plan = await _apiService.getCurrentWorkoutPlan(forceRefresh: forceRefresh);
       state = state.copyWith(
-        error: e.toString(),
+        currentPlan: plan,
         isLoading: false,
+        isFromLocalCache: false,
       );
+
+      // Save to local cache
+      if (plan != null && _currentUserId != null) {
+        await LocalDatabase.saveFitnessPlan(plan, _currentUserId!);
+        _logger.d('Saved fitness plan to local cache');
+      }
+
+      _hasLoadedOnce = true;
+    } catch (e) {
+      // If it's a 404, that's expected - no plan exists yet
+      final errorMsg = e.toString();
+      if (errorMsg.contains('404') || errorMsg.contains('No workout plan found')) {
+        state = state.copyWith(
+          currentPlan: null,
+          isLoading: false,
+          error: null, // Clear error - this is an expected state
+        );
+      } else {
+        state = state.copyWith(
+          error: errorMsg,
+          isLoading: false,
+        );
+      }
+      _hasLoadedOnce = true;
+    }
+  }
+
+  /// Sync from server in background (doesn't block UI)
+  Future<void> _syncFromServerInBackground() async {
+    try {
+      final plan = await _apiService.getCurrentWorkoutPlan(forceRefresh: true);
+      if (plan != null) {
+        // Update state if plan is different
+        if (state.currentPlan?.id != plan.id) {
+          state = state.copyWith(
+            currentPlan: plan,
+            isFromLocalCache: false,
+          );
+        }
+
+        // Update local cache
+        if (_currentUserId != null) {
+          await LocalDatabase.saveFitnessPlan(plan, _currentUserId!);
+        }
+      }
+    } catch (e) {
+      // Silently fail background sync - user already has local data
+      _logger.d('Background sync failed: $e');
     }
   }
 
@@ -50,7 +159,18 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
     try {
       state = state.copyWith(isLoading: true, error: null);
       final plan = await _apiService.generateWorkoutPlan();
-      state = state.copyWith(currentPlan: plan, isLoading: false);
+      state = state.copyWith(
+        currentPlan: plan,
+        isLoading: false,
+        isFromLocalCache: false,
+      );
+
+      // Save to local cache
+      if (_currentUserId != null) {
+        await LocalDatabase.saveFitnessPlan(plan, _currentUserId!);
+        _logger.d('Saved generated plan to local cache');
+      }
+
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -62,22 +182,125 @@ class FitnessNotifier extends StateNotifier<FitnessState> {
   }
 
   Future<bool> logWorkout({
-    required String workoutId,
-    required List<Map<String, dynamic>> exercisesCompleted,
-    required int duration,
-    required String date,
+    required String workoutDate,
+    required int durationMinutes,
+    String? workoutId,
+    String? workoutName,
+    int? caloriesBurned,
+    int? perceivedExertion,
+    int? moodAfter,
+    bool completed = true,
+    int? completionPercentage,
+    String? notes,
   }) async {
     try {
       await _apiService.logWorkout(
+        workoutDate: workoutDate,
+        durationMinutes: durationMinutes,
         workoutId: workoutId,
-        exercisesCompleted: exercisesCompleted,
-        duration: duration,
-        date: date,
+        workoutName: workoutName,
+        caloriesBurned: caloriesBurned,
+        perceivedExertion: perceivedExertion,
+        moodAfter: moodAfter,
+        completed: completed,
+        completionPercentage: completionPercentage,
+        notes: notes,
       );
+      
+      // Invalidate weekly stats cache since we logged a new workout
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('weekly_stats_cache');
+      await prefs.remove('weekly_stats_cache_time');
+      _logger.d('Invalidated weekly stats cache after logging workout');
+      
       return true;
     } catch (e) {
       state = state.copyWith(error: e.toString());
       return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getWorkoutLogs({int days = 7}) async {
+    try {
+      return await _apiService.getWorkoutLogs(days: days);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+      return [];
+    }
+  }
+
+  Future<void> loadWeeklyStats({bool forceRefresh = false}) async {
+    try {
+      // Try to load from cache first (only if not force refresh)
+      if (!forceRefresh) {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedData = prefs.getString('weekly_stats_cache');
+        final cacheTimestamp = prefs.getInt('weekly_stats_cache_time');
+        
+        if (cachedData != null && cacheTimestamp != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cacheTimestamp;
+          const fiveMinutes = 5 * 60 * 1000; // 5 minutes in milliseconds
+          
+          // Use cache if less than 5 minutes old
+          if (cacheAge < fiveMinutes) {
+            final Map<String, dynamic> cached = json.decode(cachedData);
+            state = state.copyWith(
+              weeklyStats: WeeklyWorkoutStats(
+                completedWorkouts: cached['completedWorkouts'] ?? 0,
+                totalDurationHours: (cached['totalDurationHours'] as num?)?.toDouble() ?? 0.0,
+                totalCaloriesBurned: cached['totalCaloriesBurned'] ?? 0,
+              ),
+              workoutLogs: (cached['workoutLogs'] as List?)?.cast<Map<String, dynamic>>() ?? [],
+            );
+            _logger.d('Loaded weekly stats from cache (age: ${(cacheAge / 1000).toStringAsFixed(0)}s)');
+            return;
+          }
+        }
+      }
+
+      // Fetch fresh data from API
+      final logs = await _apiService.getWorkoutLogs(days: 7);
+
+      // Calculate stats from logs
+      int completedWorkouts = 0;
+      double totalDurationMinutes = 0;
+      int totalCalories = 0;
+
+      for (final log in logs) {
+        if (log['completed'] == true) {
+          completedWorkouts++;
+        }
+        totalDurationMinutes += (log['duration_minutes'] as num?)?.toDouble() ?? 0;
+        totalCalories += (log['calories_burned'] as num?)?.toInt() ?? 0;
+      }
+
+      final weeklyStats = WeeklyWorkoutStats(
+        completedWorkouts: completedWorkouts,
+        totalDurationHours: totalDurationMinutes / 60,
+        totalCaloriesBurned: totalCalories,
+      );
+
+      state = state.copyWith(
+        weeklyStats: weeklyStats,
+        workoutLogs: logs,
+      );
+
+      // Cache the data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('weekly_stats_cache', json.encode({
+        'completedWorkouts': completedWorkouts,
+        'totalDurationHours': totalDurationMinutes / 60,
+        'totalCaloriesBurned': totalCalories,
+        'workoutLogs': logs,
+      }));
+      await prefs.setInt('weekly_stats_cache_time', DateTime.now().millisecondsSinceEpoch);
+      _logger.d('Cached weekly stats');
+    } catch (e) {
+      // Don't show error for stats - just use defaults
+      state = state.copyWith(
+        weeklyStats: const WeeklyWorkoutStats(),
+        workoutLogs: [],
+      );
     }
   }
 

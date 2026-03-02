@@ -53,12 +53,16 @@ dependencies:
   
   # Camera & Image
   image_picker: ^1.1.2
-  
+
+  # URL & Web
+  url_launcher: ^6.3.1
+
   # Push Notifications (for future)
   firebase_messaging: ^15.1.3
   
   # Local Database (for offline storage)
   sqflite: ^2.4.0
+  path: ^1.9.0
   
   # Device Info & Permissions
   device_info_plus: ^10.1.2
@@ -87,5 +91,6 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/animations/
+    - assets/data/
   
   # Using Google Fonts instead of local fonts

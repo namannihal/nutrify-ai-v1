@@ -3,9 +3,9 @@
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, String, Integer, Text, Date, ARRAY, ForeignKey
+from sqlalchemy import Boolean, String, Integer, Text, Date, DECIMAL, ARRAY, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -133,3 +133,54 @@ class Exercise(Base):
     
     # Relationships
     workout: Mapped["Workout"] = relationship("Workout", back_populates="exercises")
+
+
+class WorkoutLog(Base):
+    """Log of completed workout sessions"""
+
+    __tablename__ = "workout_logs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # Optional reference to a planned workout
+    workout_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workouts.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Workout details
+    workout_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    # If logging a custom workout (not from plan)
+    custom_workout_name: Mapped[Optional[str]] = mapped_column(String(255))
+
+    # Workout metrics
+    duration_minutes: Mapped[Optional[int]] = mapped_column(Integer)
+    calories_burned: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Exercises completed with details (sets, reps, weight used, etc.)
+    exercises_completed: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    # User feedback
+    difficulty_rating: Mapped[Optional[int]] = mapped_column(Integer)  # 1-5
+    energy_level: Mapped[Optional[int]] = mapped_column(Integer)  # 1-10
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Completion status
+    completed_fully: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    logged_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        server_default=func.now()
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="workout_logs")
+    workout: Mapped[Optional["Workout"]] = relationship("Workout")

@@ -1,13 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/progress_provider.dart';
+import '../../providers/gamification_provider.dart';
+import '../../widgets/streak_card.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authNotifierProvider).user;
+    final authState = ref.watch(authNotifierProvider);
+    final user = authState.user;
+    final profile = authState.profile;
+    final progressState = ref.watch(progressNotifierProvider);
+    final gamificationStats = ref.watch(gamificationStatsProvider);
+
+    // Calculate stats from progress entries
+    final daysActive = progressState.entries.length;
+    final goalsMetCount = 0; // TODO: Calculate from actual goals completion
     
     return Scaffold(
       appBar: AppBar(
@@ -68,21 +80,35 @@ class ProfileScreen extends ConsumerWidget {
             Row(
               children: [
                 Expanded(
-                  child: _buildStatCard(context, 'Days Active', '45', Icons.calendar_today),
+                  child: _buildStatCard(context, 'Days Active', daysActive.toString(), Icons.calendar_today),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(context, 'Goals Met', '12', Icons.emoji_events),
+                  child: _buildStatCard(context, 'Goals Met', goalsMetCount.toString(), Icons.emoji_events),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(context, 'Streak', '7', Icons.local_fire_department),
+                  child: gamificationStats.when(
+                    data: (stats) => _buildStatCard(
+                      context,
+                      'Points',
+                      stats?.totalPoints.toString() ?? '0',
+                      Icons.star,
+                    ),
+                    loading: () => _buildStatCard(context, 'Points', '--', Icons.star),
+                    error: (_, __) => _buildStatCard(context, 'Points', '0', Icons.star),
+                  ),
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 24),
-            
+
+            // Streak Card
+            const StreakStatsCard(),
+
+            const SizedBox(height: 24),
+
             // Settings
             _buildSettingsSection(context, ref),
           ],
@@ -137,6 +163,26 @@ class ProfileScreen extends ConsumerWidget {
         Card(
           child: Column(
             children: [
+              _buildSettingsTile(
+                context,
+                'Achievements',
+                'View your badges and progress',
+                Icons.emoji_events,
+                onTap: () {
+                  context.push('/achievements');
+                },
+              ),
+              const Divider(height: 1),
+              _buildSettingsTile(
+                context,
+                'Subscription',
+                'Manage your subscription plan',
+                Icons.card_membership,
+                onTap: () {
+                  context.push('/subscription');
+                },
+              ),
+              const Divider(height: 1),
               _buildSettingsTile(
                 context,
                 'Personal Information',
@@ -216,7 +262,50 @@ class ProfileScreen extends ConsumerWidget {
               );
               
               if (shouldLogout == true) {
-                ref.read(authNotifierProvider.notifier).logout();
+                // Show loading while syncing
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Syncing data before logout...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                final result = await ref.read(authNotifierProvider.notifier).logout();
+
+                if (result == LogoutResult.pendingSyncFailed) {
+                  // Show warning dialog
+                  if (context.mounted) {
+                    final forceLogout = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Unsaved Workout Data'),
+                        content: const Text(
+                          'You have workouts that haven\'t been synced to the cloud. '
+                          'If you log out now, this data may be lost.\n\n'
+                          'Do you want to logout anyway?',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).colorScheme.error,
+                            ),
+                            child: const Text('Logout Anyway'),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (forceLogout == true) {
+                      await ref.read(authNotifierProvider.notifier).forceLogout();
+                    }
+                  }
+                }
               }
             },
             icon: const Icon(Icons.logout),

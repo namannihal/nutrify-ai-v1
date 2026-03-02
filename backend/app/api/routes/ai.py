@@ -13,6 +13,7 @@ from app.schemas.ai import (
     ChatMessageRequest,
     ChatMessageResponse,
 )
+from app.ai.motivation_agent import MotivationAgent
 
 router = APIRouter()
 
@@ -54,41 +55,29 @@ async def request_ai_analysis(
     db: AsyncSession = Depends(get_db)
 ):
     """Request AI to analyze user data and generate new insights"""
-    # TODO: Integrate with LangChain agent for real AI analysis
+    # Initialize AI agent
+    agent = MotivationAgent(db)
     
-    # For now, create sample insights
-    sample_insights = [
-        AIInsight(
+    # Generate insights using AI
+    try:
+        insights_text = await agent.generate_weekly_insights(current_user)
+        
+        # Create insight record
+        insight = AIInsight(
             user_id=current_user.id,
-            insight_type="progress",
-            title="Great Progress This Week!",
-            message="Your consistency improved by 15% this week. Keep up the excellent work!",
-            explanation="Based on your workout adherence and progressive overload data.",
-            action_items=["Continue current routine", "Consider adding 5% more weight to compound exercises"],
+            insight_type="weekly_summary",
+            title="Weekly Progress Insights",
+            message=insights_text,
+            explanation="AI-generated analysis of your weekly progress",
+            action_items=[],
             priority="high",
-        ),
-        AIInsight(
-            user_id=current_user.id,
-            insight_type="nutrition",
-            title="Protein Intake Optimization",
-            message="Your protein intake has been slightly below target for 3 days.",
-            explanation="Adequate protein is crucial for muscle recovery and growth.",
-            action_items=["Add a protein shake post-workout", "Include more lean protein in lunch"],
-            priority="medium",
-        ),
-    ]
-    
-    for insight in sample_insights:
+        )
+        
         db.add(insight)
-    
-    await db.commit()
-    
-    # Return newly created insights
-    for insight in sample_insights:
+        await db.commit()
         await db.refresh(insight)
-    
-    return [
-        {
+        
+        return [{
             "id": str(insight.id),
             "user_id": str(insight.user_id),
             "type": insight.insight_type,
@@ -98,9 +87,12 @@ async def request_ai_analysis(
             "action_items": insight.action_items or [],
             "created_at": insight.created_at.isoformat(),
             "priority": insight.priority,
-        }
-        for insight in sample_insights
-    ]
+        }]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate insights: {str(e)}"
+        )
 
 
 @router.post("/chat", response_model=ChatMessageResponse)
@@ -110,32 +102,31 @@ async def chat_with_ai(
     db: AsyncSession = Depends(get_db)
 ):
     """Chat with AI health coach"""
-    # Save user message
-    user_message = ChatMessage(
-        user_id=current_user.id,
-        message_type="user",
-        content=message.message,
+    # Get recent conversation history
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.user_id == current_user.id)
+        .order_by(desc(ChatMessage.timestamp))
+        .limit(10)
     )
-    db.add(user_message)
-    await db.commit()
+    history = list(reversed(result.scalars().all()))
     
-    # TODO: Integrate with LangChain agent for real AI chat
-    # For now, generate a simple response
-    response_text = _generate_mock_response(message.message)
+    # Initialize AI agent
+    agent = MotivationAgent(db)
     
-    # Save AI response
-    ai_message = ChatMessage(
-        user_id=current_user.id,
-        message_type="assistant",
-        content=response_text,
-    )
-    db.add(ai_message)
-    await db.commit()
-    
-    return {
-        "response": response_text,
-        "explanation": "Based on your current progress and goals.",
-    }
+    # Get AI response
+    try:
+        ai_message = await agent.chat(current_user, message.message, history)
+        
+        return {
+            "response": ai_message.message,
+            "explanation": "AI-powered coaching response based on your profile and progress.",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate chat response: {str(e)}"
+        )
 
 
 def _generate_mock_response(user_input: str) -> str:

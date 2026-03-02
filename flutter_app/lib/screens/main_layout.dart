@@ -58,7 +58,20 @@ class _BottomNavigation extends StatelessWidget {
             context.go('/progress');
             break;
           case 4:
-            context.go('/ai-chat');
+            // AI Coach - Coming Soon
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Row(
+                  children: [
+                    Icon(Icons.psychology, color: Colors.white),
+                    SizedBox(width: 12),
+                    Text('AI Coach - Coming Soon!'),
+                  ],
+                ),
+                backgroundColor: Colors.deepPurple,
+                duration: Duration(seconds: 2),
+              ),
+            );
             break;
         }
       },

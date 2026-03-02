@@ -50,11 +50,14 @@ class ProgressNotifier extends StateNotifier<ProgressState> {
     }
   }
 
-  Future<void> addProgressEntry(ProgressEntry entry) async {
+  Future<void> addProgressEntry(ProgressEntryCreate entry) async {
     try {
       final newEntry = await _apiService.createProgressEntry(entry);
+      // Insert new entry at the beginning and sort by date (newest first)
+      final updatedEntries = [newEntry, ...state.entries];
+      updatedEntries.sort((a, b) => b.entryDate.compareTo(a.entryDate));
       state = state.copyWith(
-        entries: [...state.entries, newEntry],
+        entries: updatedEntries,
       );
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -71,6 +74,53 @@ class ProgressNotifier extends StateNotifier<ProgressState> {
       state = state.copyWith(entries: updatedEntries);
     } catch (e) {
       state = state.copyWith(error: e.toString());
+    }
+  }
+
+  Future<void> addWaterIntake(int ml) async {
+    try {
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      
+      // Find today's entry
+      final todayEntry = state.entries.cast<ProgressEntry?>().firstWhere(
+        (e) => e?.entryDate == today,
+        orElse: () => null,
+      );
+      
+      if (todayEntry != null) {
+        // Update existing entry
+        final newIntake = (todayEntry.waterIntakeMl ?? 0) + ml;
+        final updatedEntry = ProgressEntry(
+          id: todayEntry.id,
+          userId: todayEntry.userId,
+          entryDate: todayEntry.entryDate,
+          weight: todayEntry.weight,
+          bodyFatPercentage: todayEntry.bodyFatPercentage,
+          muscleMass: todayEntry.muscleMass,
+          measurements: todayEntry.measurements,
+          moodScore: todayEntry.moodScore,
+          energyScore: todayEntry.energyScore,
+          stressScore: todayEntry.stressScore,
+          sleepHours: todayEntry.sleepHours,
+          sleepQuality: todayEntry.sleepQuality,
+          waterIntakeMl: newIntake,
+          adherenceScore: todayEntry.adherenceScore,
+          notes: todayEntry.notes,
+          photos: todayEntry.photos,
+          createdAt: todayEntry.createdAt,
+        );
+        await updateProgressEntry(updatedEntry);
+      } else {
+        // Create new entry with just water intake
+        final newEntry = ProgressEntryCreate(
+          entryDate: today,
+          waterIntakeMl: ml,
+        );
+        await addProgressEntry(newEntry);
+      }
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+      rethrow;
     }
   }
 
