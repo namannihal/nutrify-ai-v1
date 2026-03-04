@@ -77,7 +77,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     final currentPlan = nutritionState.currentPlan;
     final nutritionTask = generationState.nutritionTask;
     final isGenerating = nutritionTask?.isActive ?? false;
-    
+
     // Get daily targets from AI-generated nutrition plan
     final calorieTarget = currentPlan?.dailyCalories ?? _calculateCalorieTarget(profile);
     // Backend returns 'protein', 'carbs', 'fat' (not with _grams suffix)
@@ -87,7 +87,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                        (calorieTarget * 0.4 / 4).round();
     final fatTarget = (currentPlan?.macros['fat'] as num?)?.toInt() ??
                      (calorieTarget * 0.3 / 9).round();
-    
+
     // Get selected day's meals from the plan
     DailyMeal? selectedDayMeals;
     if (currentPlan?.meals != null && currentPlan!.meals.isNotEmpty) {
@@ -99,11 +99,11 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
         selectedDayMeals = currentPlan.meals.first;
       }
     }
-    
+
     // Get today's progress for consumed values
     final todayDate = DateTime.now().toIso8601String().split('T')[0];
     ProgressEntry? todayProgress;
-    
+
     try {
       todayProgress = progressState.entries.firstWhere(
         (entry) => entry.entryDate.startsWith(todayDate),
@@ -112,7 +112,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
       // No entry for today
       todayProgress = null;
     }
-    
+
     // Calculate consumed values from today's meals in the AI-generated plan
     // These represent the planned intake for today
     final consumedCalories = selectedDayMeals != null ? (
@@ -121,21 +121,21 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
       selectedDayMeals.dinner.fold<int>(0, (sum, meal) => sum + meal.calories) +
       selectedDayMeals.snacks.fold<int>(0, (sum, meal) => sum + meal.calories)
     ) : 0;
-    
+
     final consumedProtein = selectedDayMeals != null ? (
       selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
       selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
       selectedDayMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.proteinGrams) +
       selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.proteinGrams)
     ).toInt() : 0;
-    
+
     final consumedCarbs = selectedDayMeals != null ? (
       selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
       selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
       selectedDayMeals.dinner.fold<double>(0, (sum, meal) => sum + meal.carbsGrams) +
       selectedDayMeals.snacks.fold<double>(0, (sum, meal) => sum + meal.carbsGrams)
     ).toInt() : 0;
-    
+
     final consumedFat = selectedDayMeals != null ? (
       selectedDayMeals.breakfast.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
       selectedDayMeals.lunch.fold<double>(0, (sum, meal) => sum + meal.fatGrams) +
@@ -145,7 +145,8 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
 
     final authState = ref.watch(authNotifierProvider);
     final hasAssessment = authState.profile?.nutritionPreferences != null &&
-        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true) &&
+        (authState.profile!.nutritionPreferences!['food_region'] != null);
 
     return Scaffold(
       appBar: AppBar(
@@ -255,9 +256,9 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                   ),
                 ),
               ),
-              
+
               const SizedBox(height: 16),
-              
+
               // Meal Plan
               Text(
                 'Today\'s Meal Plan',
@@ -265,7 +266,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              
+
               if (currentPlan == null)
                 Center(
                   child: Padding(
@@ -310,7 +311,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
                     ),
                   ),
                 ),
-              
+
               if (currentPlan != null && selectedDayMeals?.breakfast.isNotEmpty == true)
                 ...selectedDayMeals!.breakfast.map((meal) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -385,18 +386,18 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
 
   int _calculateCalorieTarget(profile) {
     if (profile == null) return 2000;
-    
+
     final age = profile.age ?? 25;
     final weight = profile.weight ?? 70;
     final height = profile.height ?? 170;
     final gender = profile.gender ?? 'male';
     final activityLevel = profile.activityLevel ?? 'moderate';
     final goal = profile.primaryGoal ?? 'maintain';
-    
+
     // Mifflin-St Jeor BMR
     double bmr = (10 * weight) + (6.25 * height) - (5 * age);
     bmr += gender == 'male' ? 5 : -161;
-    
+
     // Activity multiplier
     final activityMultipliers = {
       'sedentary': 1.2,
@@ -406,7 +407,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
       'extremely_active': 1.9,
     };
     final tdee = bmr * (activityMultipliers[activityLevel] ?? 1.55);
-    
+
     // Goal adjustment
     double targetCalories = tdee;
     if (goal == 'weight_loss') {
@@ -414,7 +415,7 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     } else if (goal == 'muscle_gain') {
       targetCalories += 300;
     }
-    
+
     return targetCalories.round();
   }
 
@@ -829,18 +830,20 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     // Guard: Ensure assessment is completed
     final authState = ref.read(authNotifierProvider);
     final hasAssessment = authState.profile?.nutritionPreferences != null &&
-        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
-    
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true) &&
+        (authState.profile!.nutritionPreferences!['food_region'] != null);
+
     if (!hasAssessment) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please complete your nutrition assessment first!'),
+          content: Text('Please complete your food preferences first!'),
           backgroundColor: Colors.orange,
         ),
       );
+      _showNutritionQuestionnaire(context);
       return;
     }
-    
+
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     showDialog(
@@ -959,22 +962,18 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
     // Guard: Ensure assessment is completed before allowing generation
     final authState = ref.read(authNotifierProvider);
     final hasAssessment = authState.profile?.nutritionPreferences != null &&
-        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true);
-    
+        (authState.profile!.nutritionPreferences!['questionnaire_completed'] == true) &&
+        (authState.profile!.nutritionPreferences!['food_region'] != null);
+
     if (!hasAssessment) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please complete your nutrition assessment first!'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        _showNutritionQuestionnaire(context);
       }
       return;
     }
-    
+
     final success = await ref.read(generationNotifierProvider.notifier).startNutritionGeneration();
-    
+
     if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
