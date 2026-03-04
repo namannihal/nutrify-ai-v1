@@ -171,13 +171,12 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
             },
             tooltip: 'Scan Food (Coming Soon)',
           ),
-          // Regenerate button
-          if (hasAssessment)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: nutritionState.isLoading ? null : () => _showRegenerateDialog(context, ref),
-              tooltip: 'Regenerate Plan',
-            ),
+          // Regenerate button - always visible so users can redo plan
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: nutritionState.isLoading ? null : () => _showRegenerateDialog(context, ref),
+            tooltip: 'Regenerate Plan',
+          ),
         ],
       ),
       body: LoadingOverlay(
