@@ -170,7 +170,7 @@ class NutritionAgent:
         profile = user.profile
 
         # Build AI prompt with user context
-        system_prompt = self._build_nutrition_system_prompt()
+        system_prompt = self._build_nutrition_system_prompt(user)
         user_prompt = self._build_nutrition_user_prompt(user, targets, context)
 
         # Use fast LLM for meal generation (cheaper and faster)
@@ -186,69 +186,92 @@ class NutritionAgent:
 
         return meals
 
-    def _build_nutrition_system_prompt(self) -> str:
-        """System prompt for nutrition agent"""
-        import random
+    def _build_nutrition_system_prompt(self, user: User) -> str:
+        """System prompt for nutrition agent — region-aware, practical home cooking"""
+        profile = user.profile
+        nutrition_prefs = (profile.nutrition_preferences or {}) if profile else {}
 
-        # Randomize cuisine focus for variety
-        cuisine_themes = [
-            "Mediterranean and Middle Eastern cuisines",
-            "Asian-inspired meals (Japanese, Korean, Thai, Vietnamese)",
-            "Latin American and Mexican cuisines",
-            "Indian and South Asian flavors",
-            "Modern American with international fusion",
-            "European comfort foods (Italian, French, Greek)",
-        ]
-        cuisine_focus = random.choice(cuisine_themes)
+        food_region = nutrition_prefs.get("food_region", "mixed")
+        cooking_skill = nutrition_prefs.get("cooking_skill", "intermediate")
+        cooking_time = nutrition_prefs.get("cooking_time", "30 min")
+        spice_tolerance = nutrition_prefs.get("spice_tolerance", "medium")
+        staple_foods = nutrition_prefs.get("staple_foods", [])
+        foods_to_avoid = nutrition_prefs.get("foods_to_avoid", "")
 
-        # Randomize protein variety
-        protein_focuses = [
-            "emphasizing fish and seafood twice this week",
-            "featuring lean poultry and eggs",
-            "incorporating plant-based proteins like tofu, tempeh, and legumes",
-            "balancing red meat, poultry, and fish throughout the week",
-        ]
-        protein_focus = random.choice(protein_focuses)
+        # Region → cuisine instruction mapping
+        region_instructions = {
+            "indian_north": "Plan meals using North Indian home cooking: dal, roti, rice, sabzi, raita, parathas, poha, upma, khichdi. Think what a typical Indian household eats daily — simple, comforting, practical.",
+            "indian_south": "Plan meals using South Indian home cooking: idli, dosa, sambar, rice, rasam, upma, pongal, curd rice, coconut chutney, uttapam. Everyday home-style meals.",
+            "american": "Plan meals using simple American home cooking: oatmeal, eggs, sandwiches, grilled chicken, salads, pasta, rice bowls and casseroles. Easy weeknight meals anyone can make.",
+            "mediterranean": "Plan meals using Mediterranean home cooking: hummus, grilled fish, olive oil dishes, fresh salads, whole grains, lentil soup, tabbouleh. Healthy and simple.",
+            "east_asian": "Plan meals using East Asian home cooking: steamed rice, stir-fries, miso soup, tofu dishes, noodle bowls, fried rice. Practical everyday meals.",
+            "southeast_asian": "Plan meals using Southeast Asian home cooking: rice, curries, noodle soups, stir-fried vegetables, satay. Flavorful but practical.",
+            "latin_american": "Plan meals using Latin American home cooking: rice and beans, tortillas, grilled chicken, tacos, burrito bowls, plantains. Simple and filling.",
+            "middle_eastern": "Plan meals using Middle Eastern home cooking: flatbread, kebabs, lentils, yogurt, hummus, rice pilaf, falafel. Comforting everyday food.",
+            "european": "Plan meals using European home cooking: bread, soups, pasta, roast chicken, potatoes, salads, omelettes, stews. Classic comfort food.",
+            "african": "Plan meals using African home cooking: stews, rice, plantain, jollof rice, lentils, grilled fish, couscous. Hearty everyday meals.",
+            "mixed": "Plan meals using a practical international mix based on the user's staple foods. Keep it simple and accessible.",
+        }
 
-        return f"""You are an expert nutritionist and meal planner AI.
-Your role is to create personalized, balanced, and UNIQUE weekly meal plans.
+        cuisine_instruction = region_instructions.get(food_region, region_instructions["mixed"])
 
-VARIETY IS CRITICAL - This week's theme: {cuisine_focus}, {protein_focus}.
+        skill_instruction = {
+            "beginner": "Recipes MUST be very simple — max 5-6 ingredients, one-pot/one-pan where possible, no complex techniques. Step-by-step instructions a complete beginner can follow.",
+            "intermediate": "Recipes should be moderately simple — common techniques like sautéing, boiling, baking. Clear instructions.",
+            "advanced": "Recipes can include more complex techniques and ingredients. Still provide clear instructions.",
+        }.get(cooking_skill, "Recipes should be moderately simple.")
+
+        staple_instruction = ""
+        if staple_foods:
+            staple_instruction = f"\nBUILD MEALS AROUND THESE STAPLE FOODS (user eats these regularly): {', '.join(staple_foods)}"
+
+        avoid_instruction = ""
+        if foods_to_avoid:
+            avoid_instruction = f"\n⚠️ FOODS THE USER DISLIKES (do NOT include): {foods_to_avoid}"
+
+        return f"""You are a practical home-cooking nutritionist AI.
+Your role is to create simple, everyday meal plans that someone actually makes at home — NOT fancy restaurant dishes.
+
+CUISINE FOCUS: {cuisine_instruction}
+{staple_instruction}
+{avoid_instruction}
+
+COOKING LEVEL: {skill_instruction}
+MAX COOKING TIME per meal: {cooking_time}
+SPICE LEVEL: {spice_tolerance}
 
 Key principles:
-- Prioritize whole foods and balanced macronutrients
-- Consider user preferences, dietary restrictions, and cultural foods
-- MAXIMUM VARIETY: Never repeat the same main protein or dish across the week
-- Different breakfast styles each day (smoothies, eggs, oatmeal, yogurt bowls, etc.)
-- Different lunch formats (salads, wraps, bowls, soups, sandwiches)
-- Different dinner cuisines and cooking methods each day
-- Make meals practical based on cooking skills and time constraints
+- Meals should be what people ACTUALLY cook at home daily — simple, practical, filling
+- DO NOT suggest overly fancy or restaurant-style dishes (no "Za'atar Omelette with Feta and Tomato" when the user eats poha for breakfast)
+- Include step-by-step cooking instructions that are easy to follow
+- Use commonly available ingredients from the user's region
+- Variety within the cuisine — different dishes each day but staying within the food culture
 - Include specific portion sizes and preparation methods
 - Provide accurate calorie and macro breakdowns per meal
 
 CRITICAL: You MUST respond with ONLY a valid JSON array, nothing else. No explanations, no code blocks, no markdown.
 
-Return exactly 28 meals (4 per day x 7 days) as a JSON array. Each meal object must have these fields:
+Return the meals as a JSON array. Each meal object must have these fields:
 {{
   "day": 0,
   "meal_type": "breakfast",
   "meal_order": 1,
-  "name": "Shakshuka with Crusty Bread",
-  "description": "Poached eggs in spiced tomato sauce with feta and fresh herbs",
-  "calories": 380,
-  "protein_grams": 18.5,
-  "carbs_grams": 32.0,
-  "fat_grams": 20.0,
-  "fiber_grams": 5.0,
-  "ingredients": {{"eggs": "2 large", "tomato_sauce": "1 cup", "feta": "1 oz", "bread": "1 slice"}},
-  "instructions": "Simmer tomato sauce with spices, crack eggs into sauce, cover and cook until set",
+  "name": "Poha with Peanuts and Lemon",
+  "description": "Flattened rice stir-fried with onions, peanuts, turmeric, and lemon juice",
+  "calories": 320,
+  "protein_grams": 8.0,
+  "carbs_grams": 48.0,
+  "fat_grams": 10.0,
+  "fiber_grams": 3.0,
+  "ingredients": {{"flattened_rice": "1.5 cups", "peanuts": "2 tbsp", "onion": "1 medium", "turmeric": "0.5 tsp", "lemon": "1"}},
+  "instructions": "1. Rinse poha in water and drain. 2. Heat oil, add mustard seeds and curry leaves. 3. Add chopped onion, green chili, sauté until soft. 4. Add turmeric, salt, peanuts. 5. Add poha, mix gently, cook 2 min. 6. Squeeze lemon juice, garnish with coriander.",
   "prep_time_minutes": 5,
-  "cook_time_minutes": 15,
-  "cuisine_type": "Middle Eastern",
+  "cook_time_minutes": 10,
+  "cuisine_type": "Indian",
   "dietary_tags": ["vegetarian"]
 }}
 
-Ensure daily totals match target calories and macros. Be CREATIVE and DIVERSE with meal choices!
+Ensure daily totals match target calories and macros.
 RESPOND WITH ONLY THE JSON ARRAY."""
 
     def _build_nutrition_user_prompt(
@@ -257,21 +280,20 @@ RESPOND WITH ONLY THE JSON ARRAY."""
         targets: Dict[str, int],
         context: Dict
     ) -> str:
-        """Build user-specific prompt with context"""
-        import random
+        """Build user-specific prompt with context — region-aware"""
         from datetime import datetime
 
         profile = user.profile
+        nutrition_prefs = (profile.nutrition_preferences or {}) if profile else {}
 
-        # Add variety hints
-        breakfast_styles = ["smoothie bowl", "egg-based", "overnight oats", "savory breakfast", "pancakes/waffles", "yogurt parfait", "breakfast burrito"]
-        random.shuffle(breakfast_styles)
-        breakfast_hint = ", ".join(breakfast_styles[:3])
+        meals_per_day = profile.meals_per_day if profile and profile.meals_per_day else 4
+        food_region = nutrition_prefs.get("food_region", "mixed")
+        diet_type = nutrition_prefs.get("diet_type", "No Restriction")
 
         # Generate a unique seed based on time for truly different plans
         unique_seed = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        prompt = f"""Generate a UNIQUE 7-day meal plan (seed: {unique_seed}) for this user:
+        prompt = f"""Generate a practical 7-day home-cooking meal plan (seed: {unique_seed}) for this user:
 
 NUTRITIONAL TARGETS (daily):
 - Calories: {targets['daily_calories']} kcal
@@ -284,8 +306,9 @@ USER PROFILE:
 - Gender: {profile.gender if profile else 'N/A'}
 - Primary Goal: {profile.primary_goal if profile else 'general health'}
 - Activity Level: {profile.activity_level if profile else 'moderate'}
-- Meals Per Day: {profile.meals_per_day if profile and profile.meals_per_day else 4}
-- Cooking Time Preference: {profile.cooking_time if profile and profile.cooking_time else 'moderate'}
+- Meals Per Day: {meals_per_day}
+- Food Region: {food_region}
+- Diet Type: {diet_type}
 
 """
 
@@ -301,13 +324,22 @@ USER PROFILE:
 {profile.allergies}
 
 """
-        if profile and profile.nutrition_preferences:
-            prompt += f"NUTRITION PREFERENCES: {profile.nutrition_preferences}\n\n"
 
-        prompt += f"""VARIETY REQUIREMENTS:
-- Include at least 3 different breakfast styles from: {breakfast_hint}
-- Each dinner should feature a different main protein
-- Mix cooking methods: grilling, baking, sautéing, steaming, raw
+        # Add staple foods and dislikes from nutrition preferences
+        staple_foods = nutrition_prefs.get("staple_foods", [])
+        if staple_foods:
+            prompt += f"BUILD MEALS AROUND THESE STAPLE FOODS: {', '.join(staple_foods)}\n\n"
+
+        foods_to_avoid = nutrition_prefs.get("foods_to_avoid", "")
+        if foods_to_avoid:
+            prompt += f"FOODS TO AVOID (user dislikes): {foods_to_avoid}\n\n"
+
+        prompt += f"""IMPORTANT:
+- Generate exactly {meals_per_day * 7} meals ({meals_per_day} per day x 7 days)
+- All meals should be simple HOME-COOKED food from the user's region
+- Include step-by-step cooking instructions for each meal
+- Different dishes each day but staying true to the food culture
+- Vary proteins and preparations throughout the week
 
 """
 
@@ -315,20 +347,18 @@ USER PROFILE:
         episodic = context.get("episodic_memory", {})
         semantic = context.get("semantic_memory", {})
 
-        # Include past nutrition history for adaptive planning
         nutrition_history = episodic.get("nutrition_history", [])
         if nutrition_history:
-            prompt += f"\nPAST NUTRITION PLANS (adapt and vary from these):\n"
+            prompt += "PAST NUTRITION PLANS (vary from these):\n"
             for hist in nutrition_history[:3]:
-                prompt += f"  - Week of {hist.get('week_start', 'N/A')}: {hist.get('daily_calories', 'N/A')} kcal, {hist.get('meal_count', 0)} meals\n"
+                prompt += f"  - Week of {hist.get('week_start', 'N/A')}: {hist.get('daily_calories', 'N/A')} kcal\n"
             prompt += "\n"
 
-        # Include preferences from semantic memory
         prefs = semantic.get("preferences", {})
         if prefs.get("dietary"):
             prompt += f"KNOWN PREFERENCES FROM HISTORY: {', '.join(prefs['dietary'])}\n"
 
-        prompt += "\nGenerate a creative and diverse 7-day meal plan as JSON:"
+        prompt += "\nGenerate the meal plan as a JSON array:"
 
         return prompt
 
