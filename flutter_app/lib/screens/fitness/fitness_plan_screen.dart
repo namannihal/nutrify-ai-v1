@@ -9,6 +9,7 @@ import '../../widgets/common/loading_overlay.dart';
 import '../../services/workout_cache_service.dart';
 import 'active_workout_screen.dart';
 import 'fitness_questionnaire_screen.dart';
+import 'workout_history_screen.dart';
 
 class FitnessPlanScreen extends ConsumerStatefulWidget {
   const FitnessPlanScreen({super.key});
@@ -248,7 +249,12 @@ class _FitnessPlanScreenState extends ConsumerState<FitnessPlanScreen> with Widg
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
-              // TODO: Show workout history
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const WorkoutHistoryScreen(),
+                ),
+              );
             },
           ),
           if (hasAssessment)
