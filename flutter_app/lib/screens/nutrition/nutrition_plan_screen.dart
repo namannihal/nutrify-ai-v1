@@ -8,6 +8,8 @@ import '../../providers/generation_provider.dart';
 import '../../models/progress.dart';
 import '../../models/nutrition.dart';
 import '../../widgets/common/loading_overlay.dart';
+import '../../services/api_service.dart';
+import '../../services/request_cache_service.dart';
 import 'nutrition_questionnaire_screen.dart';
 
 class NutritionPlanScreen extends ConsumerStatefulWidget {
@@ -30,7 +32,8 @@ class _NutritionPlanScreenState extends ConsumerState<NutritionPlanScreen> {
       // Setup generation completion callbacks
       final generationNotifier = ref.read(generationNotifierProvider.notifier);
       generationNotifier.onNutritionComplete = (resultId) {
-        // Refresh the nutrition plan when generation completes
+        // Invalidate API cache and force reload from server
+        requestCache.invalidate('nutrition_plan_current');
         ref.read(nutritionNotifierProvider.notifier).loadCurrentPlan(forceRefresh: true);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
