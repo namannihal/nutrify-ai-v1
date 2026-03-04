@@ -9,6 +9,7 @@ import '../models/fitness.dart';
 import '../services/api_service.dart';
 import '../services/workout_cache_service.dart';
 import '../services/sync_service.dart';
+import 'auth_provider.dart';
 
 final _logger = Logger();
 final _uuid = Uuid();

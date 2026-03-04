@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/ai.dart';
 import '../services/api_service.dart';
+import 'auth_provider.dart';
 
 // AI Chat State
 class AiChatState {
